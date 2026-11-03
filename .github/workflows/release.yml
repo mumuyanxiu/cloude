@@ -1,0 +1,61 @@
+name: Windows release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Match release tag and version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match package.json version.' }
+      - run: npm run verify:privacy
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:desktop
+      - run: npm run package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: npm run verify:release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-claude-windows
+          path: |
+            release/*/Cloud-Claude-Setup-*.exe
+            release/*/Cloud-Claude-Setup-*.exe.blockmap
+            release/**/latest.yml
+            release/**/SHA256SUMS.txt
+            output/release-verification.json
+      - name: Publish a complete release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $directory = "release/$version"
+          $assets = @(
+            "$directory/Cloud-Claude-Setup-$version.exe",
+            "$directory/Cloud-Claude-Setup-$version.exe.blockmap",
+            "$directory/latest.yml",
+            "$directory/SHA256SUMS.txt",
+            'scripts/update-windows.ps1'
+          )
+          # Upload while hidden, then expose metadata and binaries together.
+          $notesFile = Join-Path $env:RUNNER_TEMP 'cloud-claude-release-notes.txt'
+          "Cloud Claude $version`n`nWindows installer with in-app updates. Workspace settings are preserved during updates. SHA256 checksums are attached." | Set-Content -LiteralPath $notesFile -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME --draft --verify-tag --title "Cloud Claude $version" --notes-file $notesFile @assets
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+          gh release edit $env:GITHUB_REF_NAME --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

@@ -1,0 +1,10 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const pkg = require('../package.json');
+const directory = path.resolve(__dirname, '..', pkg.build.directories.output.replace('${version}', pkg.version));
+const names = [`Cloud-Claude-Setup-${pkg.version}.exe`, `Cloud-Claude-Setup-${pkg.version}.exe.blockmap`, 'latest.yml'].sort();
+for (const name of names) if (!fs.existsSync(path.join(directory, name))) throw new Error(`Missing release artifact: ${name}`);
+const content = names.map(name => `${crypto.createHash('sha256').update(fs.readFileSync(path.join(directory, name))).digest('hex')}  ${name}`).join('\n') + '\n';
+fs.writeFileSync(path.join(directory, 'SHA256SUMS.txt'), content);
+console.log(`Generated checksums for ${names.length} release artifacts.`);

@@ -1,0 +1,31 @@
+.upload-progress {
+  margin: 12px 14px;
+  padding: 13px 14px;
+  border: 1px solid #dfd0bd;
+  border-radius: 8px;
+  background: #f6efe4;
+  color: #796349;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.upload-progress-heading, .upload-progress-heading > span, .upload-progress-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.upload-progress-heading > span { justify-content: flex-start; }
+.upload-progress-heading strong { font-size: 13px; font-weight: 500; color: #b26947; }
+.upload-progress-name { margin-top: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #776b5a; }
+.upload-progress-track { margin: 11px 0 9px; height: 6px; border-radius: 6px; overflow: hidden; background: #e5d9c8; }
+.upload-progress-track > span { height: 100%; display: block; background: #bc7754; border-radius: inherit; transition: width .15s; }
+.upload-progress-track.indeterminate > span { width: 30%; animation: upload-pulse 1.8s ease-in-out infinite alternate; }
+.upload-progress-metrics { flex-wrap: wrap; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.upload-progress-detail { margin-top: 5px; font-size: 10px; color: #89785f; }
+.upload-progress-secondary { margin-top: 5px; font-size: 10px; color: #89785f; }
+.upload-progress-wait { margin: 9px 0 0; padding-top: 9px; border-top: 1px solid #debd8b; font-size: 11px; line-height: 1.7; color: #956331; }
+.upload-progress.waiting { border-color: #d2aa72; }
+@keyframes upload-pulse { from { transform: translateX(0); } to { transform: translateX(230%); } }
+@media(prefers-reduced-motion:reduce) {
+  .upload-progress-track > span { animation: none; transition: none; }
+}

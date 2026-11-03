@@ -1,0 +1,81 @@
+{
+  "name": "cloud-claude",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Windows desktop workspace for remote Claude Code projects",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mumuyanxiu/cloude.git"
+  },
+  "author": "Cloud Claude contributors",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:desktop": "node scripts/test-desktop.cjs",
+    "package": "npm run build && electron-builder --win nsis --x64 --publish never && node scripts/release-checksums.cjs",
+    "verify:privacy": "node scripts/check-privacy.cjs",
+    "verify:release": "node scripts/verify-release.cjs"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-python": "^6.2.1",
+    "@uiw/react-codemirror": "^4.25.0",
+    "electron-updater": "^6.8.11",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "electron": "45.1.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.3",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "appId": "io.github.cloudclaude.desktop",
+    "productName": "Cloud Claude",
+    "directories": {
+      "output": "release/${version}"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signExecutable": false,
+      "icon": "assets/claude-icon.png"
+    },
+    "nsis": {
+      "artifactName": "Cloud-Claude-Setup-${version}.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mumuyanxiu",
+        "repo": "cloude",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
