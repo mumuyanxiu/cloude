@@ -23,16 +23,26 @@ function walk(directory) {
 }
 for (const directory of ['electron', 'dist', 'assets']) walk(directory);
 assert.equal(JSON.parse(asar.extractFile(archive, 'package.json')).version, version);
-const executable = path.join(releaseDirectory, `Cloud-Claude-Setup-${version}.exe`);
+const installerName = packageInfo.build.nsis.artifactName.replace('${version}', version);
+assert.equal(installerName, `Cloude-Setup-${version}.exe`);
+assert.equal(packageInfo.name, 'cloude');
+assert.equal(packageInfo.build.productName, 'Cloude');
+assert.equal(packageInfo.build.appId, 'io.github.cloudclaude.desktop');
+assert.ok(fs.statSync(path.join(releaseDirectory, 'win-unpacked', 'Cloude.exe')).isFile());
+const executable = path.join(releaseDirectory, installerName);
 const bytes = fs.readFileSync(executable);
 const metadata = yaml.load(fs.readFileSync(path.join(releaseDirectory, 'latest.yml'), 'utf8'));
 assert.equal(metadata.version, version);
 assert.equal(metadata.path, path.basename(executable));
+assert.equal(metadata.files[0].url, installerName);
 assert.equal(metadata.sha512, crypto.createHash('sha512').update(bytes).digest('base64'));
 assert.equal(metadata.files[0].size, bytes.length);
 assert.equal(metadata.files[0].sha512, metadata.sha512);
 const checksums = fs.readFileSync(path.join(releaseDirectory, 'SHA256SUMS.txt'), 'utf8').trim().split(/\r?\n/);
-assert.equal(checksums.length, 3);
+assert.equal(checksums.length, 4);
+const expectedNames = [installerName, `${installerName}.blockmap`, `Cloud-Claude-Setup-${version}.exe`, 'latest.yml'].sort();
+assert.deepEqual(checksums.map(line => line.slice(66)).sort(), expectedNames);
+assert.ok(fs.readFileSync(path.join(releaseDirectory, `Cloud-Claude-Setup-${version}.exe`)).equals(bytes), 'Legacy installer alias must contain the same Cloude installer');
 for (const line of checksums) {
   const match = /^([a-f0-9]{64})  ([A-Za-z0-9.-]+)$/.exec(line);
   assert.ok(match, 'Invalid checksum entry');

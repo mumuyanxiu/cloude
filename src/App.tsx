@@ -467,7 +467,7 @@ export default function App() {
 
   return <div className={`app-shell ${!sidebarOpen ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar">
-      <div className="brand"><Star size={30} /><span>Cloud Claude</span><IconButton label="收起侧栏" onClick={() => setSidebarOpen(false)}><PanelLeftClose size={16} /></IconButton></div>
+      <div className="brand"><Star size={30} /><span>Cloude</span><IconButton label="收起侧栏" onClick={() => setSidebarOpen(false)}><PanelLeftClose size={16} /></IconButton></div>
       <button className="new-chat" onClick={newConversation}><Plus size={17} />新对话</button>
       <div className="sidebar-section-title"><span>项目</span><div className="project-actions"><IconButton label="读取已有项目" onClick={openExistingProject}><FolderOpen size={15} /></IconButton><IconButton label="添加项目" onClick={openProjectModal}><Plus size={15} /></IconButton></div></div>
       <div className="project-list">{visibleProjects.map(item => <button className={`project-item ${item.id === activeProjectId ? 'selected' : ''}`} key={item.id} onClick={() => selectProject(item)} title={item.path}><Folder size={16} /><span>{item.name}</span>{item.id === activeProjectId && <ChevronDown size={14} />}</button>)}{!visibleProjects.length && <button className="empty-project" onClick={openProjectModal}><FolderPlus size={19} /><span>打开你的第一个项目</span></button>}</div>

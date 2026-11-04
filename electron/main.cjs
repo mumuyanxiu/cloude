@@ -9,15 +9,17 @@ const { CredentialStore, connectWithCredentials } = require('./credentials.cjs')
 const { createUploadPlan, executeUploadPlan } = require('./uploads.cjs');
 const { UpdateService } = require('./updates.cjs');
 
-app.setName('Cloud Claude');
-const dataDirectory = process.env.CLOUD_CLAUDE_DATA || (app.isPackaged ? path.join(app.getPath('appData'), 'Cloud Claude') : path.join(__dirname, '..', '.runtime'));
+const testMode = process.env.CLOUDE_TEST || process.env.CLOUD_CLAUDE_TEST;
+app.setName('Cloude');
+// Reuse the established profile so renamed builds can read existing settings and credentials.
+const dataDirectory = process.env.CLOUDE_DATA || process.env.CLOUD_CLAUDE_DATA || (app.isPackaged ? path.join(app.getPath('appData'), 'Cloud Claude') : path.join(__dirname, '..', '.runtime'));
 app.setPath('userData', dataDirectory);
 const browserDataDirectory = path.join(dataDirectory, 'browser-cache');
 require('node:fs').mkdirSync(browserDataDirectory, { recursive: true });
 app.setPath('sessionData', browserDataDirectory);
 // A shared profile must have only one writer, including across app versions.
 // Isolated integration fixtures intentionally use their own test processes.
-if (!process.env.CLOUD_CLAUDE_TEST && !app.requestSingleInstanceLock()) app.exit(0);
+if (!testMode && !app.requestSingleInstanceLock()) app.exit(0);
 const store = new StateStore(dataDirectory);
 const credentials = new CredentialStore(store);
 const jobs = new Set();
@@ -60,9 +62,9 @@ async function verifyHost({ host, port, fingerprint }) {
 }
 const remote = new RemoteClient({ emit: send, verifyHost });
 const updates = new UpdateService({
-  updater: app.isPackaged && process.platform === 'win32' && !process.env.CLOUD_CLAUDE_TEST ? require('electron-updater').autoUpdater : null,
+  updater: app.isPackaged && process.platform === 'win32' && !testMode ? require('electron-updater').autoUpdater : null,
   version: app.getVersion(),
-  supported: app.isPackaged && process.platform === 'win32' && !process.env.CLOUD_CLAUDE_TEST,
+  supported: app.isPackaged && process.platform === 'win32' && !testMode,
   prepareInstall: async () => {
     if (jobs.size || operations || connecting || uploading) throw new Error('请先完成正在运行的任务和文件操作');
     // Reserve the connection boundary until the installer exits this process.
@@ -251,7 +253,7 @@ async function createWindow() {
   hostKeys = await store.read('known-hosts.json', {});
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
-  window = new BrowserWindow({ width: 1480, height: 960, minWidth: 1040, minHeight: 700, title: 'Cloud Claude', icon: path.join(__dirname, '..', 'assets', 'claude-icon.png'), backgroundColor: '#f8f6f1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, webSecurity: true } });
+  window = new BrowserWindow({ width: 1480, height: 960, minWidth: 1040, minHeight: 700, title: 'Cloude', icon: path.join(__dirname, '..', 'assets', 'claude-icon.png'), backgroundColor: '#f8f6f1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, webSecurity: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
@@ -259,7 +261,7 @@ async function createWindow() {
     const choice = dialog.showMessageBoxSync(window, { type: 'question', title: '尚有未保存的修改', message: '编辑器中的修改尚未保存，确定退出吗？', buttons: ['返回编辑', '放弃修改并退出'], defaultId: 0, cancelId: 0 });
     if (choice === 1) event.preventDefault();
   });
-  window.once('ready-to-show', () => { if (!process.env.CLOUD_CLAUDE_TEST) window.show(); });
+  window.once('ready-to-show', () => { if (!testMode) window.show(); });
   window.on('close', event => {
     if (quitting || (!jobs.size && !operations)) return;
     event.preventDefault();
@@ -274,7 +276,7 @@ async function createWindow() {
   return window;
 }
 
-const ready = app.whenReady().then(createWindow).catch(error => { dialog.showErrorBox('Cloud Claude 启动失败', error.message); app.quit(); throw error; });
+const ready = app.whenReady().then(createWindow).catch(error => { dialog.showErrorBox('Cloude 启动失败', error.message); app.quit(); throw error; });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   if (shutdownFinished) return;

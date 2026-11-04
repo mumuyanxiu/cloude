@@ -28,8 +28,8 @@ async function until(check, label, timeout = 10000) {
 async function run() {
   await fs.access(path.join(projectRoot, 'dist', 'index.html'));
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-electron-smoke-'));
-  process.env.CLOUD_CLAUDE_TEST = '1';
-  process.env.CLOUD_CLAUDE_DATA = path.join(temporaryRoot, 'state');
+  process.env.CLOUDE_TEST = '1';
+  process.env.CLOUDE_DATA = path.join(temporaryRoot, 'state');
 
   // Any unexpected dialog or browser/explorer launch fails this test instead
   // of prompting the user. Individual checks replace only the dialog needed.
@@ -71,6 +71,14 @@ async function run() {
     // fixtures are written, otherwise that independent save can race the check.
     await pause(550);
     await main.store.queue;
+
+    await check('Cloude identity is consistent across the app, window and renderer', async () => {
+      assert.equal(app.getName(), 'Cloude');
+      assert.equal(window.getTitle(), 'Cloude');
+      assert.equal(await evaluate('document.title'), 'Cloude');
+      assert.equal(await evaluate("document.querySelector('.brand > span')?.textContent"), 'Cloude');
+      assert.equal(app.getPath('userData'), process.env.CLOUDE_DATA);
+    });
 
     let layout;
     await check('real renderer renders without horizontal overflow', async () => {

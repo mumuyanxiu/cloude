@@ -1,10 +1,10 @@
-# Cloud Claude
+# Cloude
 
 通过 SSH 连接 Claude Code 的 Windows 桌面工作台，支持项目与历史会话、流式聊天、代码编辑、Git 差异、终端、文件上传下载及账户用量。
 
 ## 安装与更新
 
-推荐在 [Releases](https://github.com/mumuyanxiu/cloude/releases/latest) 下载 `Cloud-Claude-Setup-<版本>.exe`。安装程序支持选择目录，默认按当前用户安装。后续升级沿用原安装目录和桌面快捷方式。
+推荐在 [Releases](https://github.com/mumuyanxiu/cloude/releases/latest) 下载 `Cloude-Setup-<版本>.exe`。安装程序支持选择目录，默认按当前用户安装。后续升级沿用原安装目录和桌面快捷方式。
 
 安装版启动后检查更新；在左侧“应用更新”中下载新版本，下载完成后点击“重启并安装”，后台安装后自动重新打开应用。有未保存文件、运行任务或文件操作时，完成处理后再安装。网络中断可重试，下载校验通过后才能安装。
 
@@ -13,7 +13,7 @@
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1
 # 首次安装可指定目录；升级时不传目录会沿用现有安装位置
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1 -InstallDirectory "D:\Apps\Cloud Claude"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1 -InstallDirectory "D:\Apps\Cloude"
 # 仅下载并校验安装包，或使用静默安装
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1 -DownloadOnly
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1 -Silent
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1 -
 
 ## 数据位置
 
-应用数据位于 `%APPDATA%/Cloud Claude/`，开发版位于项目下 `.runtime/`。连接配置与会话保存在 `workspace.json`，主机指纹保存在 `known-hosts.json`，登录凭据使用当前 Windows 用户的 DPAPI 加密保存在 `credentials.json`。用户数据、密钥和测试输出均不纳入源码和安装包。
+Cloude 的应用数据沿用既有配置目录 `%APPDATA%/Cloud Claude/`，开发版位于项目下 `.runtime/`。连接配置与会话保存在 `workspace.json`，主机指纹保存在 `known-hosts.json`，登录凭据使用当前 Windows 用户的 DPAPI 加密保存在 `credentials.json`。用户数据、密钥和测试输出均不纳入源码和安装包。
 
 ## 开发与验证
 

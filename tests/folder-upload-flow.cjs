@@ -13,7 +13,7 @@ const temporaryRoot = require('node:fs').mkdtempSync(path.join(os.tmpdir(), 'wor
 const dataDirectory = path.join(temporaryRoot, 'state');
 const browserDirectory = path.join(dataDirectory, 'browser-cache');
 require('node:fs').mkdirSync(browserDirectory, { recursive: true });
-process.env.CLOUD_CLAUDE_TEST = '1'; process.env.CLOUD_CLAUDE_DATA = dataDirectory;
+process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = dataDirectory;
 const { app, dialog, shell } = require('electron');
 if (!app) throw new Error('Run using Electron after npm run build.');
 app.setPath('userData', dataDirectory); app.setPath('sessionData', browserDirectory);

@@ -1,6 +1,6 @@
 # Windows 发布流程
 
-首次发布版本为 **1.0.0**，应用更新源由 `package.json` 的 `build.publish` 指定。
+Cloude 品牌更名版本为 **1.0.2**，应用更新源由 `package.json` 的 `build.publish` 指定。
 
 ## 本地构建
 
@@ -11,15 +11,15 @@ npm test
 npm run package
 ```
 
-产物位于 `release/<版本>/`：安装包、安装包 `.blockmap`、`latest.yml` 和 `SHA256SUMS.txt`。应用使用 electron-updater 读取 `latest.yml`，按元数据校验 SHA512，并使用块映射进行差分下载；差分不可用时下载完整安装包。PowerShell 脚本使用 SHA256 清单校验完整安装包。
+产物位于 `release/<版本>/`，包含 `Cloude-Setup-<版本>.exe`、对应的 `.blockmap`、`latest.yml` 和 `SHA256SUMS.txt`。应用使用 electron-updater 读取 `latest.yml`，按元数据校验 SHA512，并使用块映射进行差分下载。差分不可用时下载完整安装包。PowerShell 脚本使用 SHA256 清单校验完整安装包。
 
-安装包采用 NSIS 当前用户安装，允许选择目录。保持 `appId`、产品名称和安装包命名规则稳定，升级时保留安装目录及 `%APPDATA%/Cloud Claude/`。用户数据不在安装目录，卸载也保留用户数据。当前打包配置未接入代码签名证书。
+安装包采用 NSIS 当前用户安装，允许选择目录。Cloude 1.0.2 沿用原有 `appId` 和安装记录，升级时沿用安装目录和既有配置目录 `%APPDATA%/Cloud Claude/`。用户数据不在安装目录，卸载也保留用户数据。当前打包配置未接入代码签名证书。
 
 ## GitHub Actions
 
-1. 确认 `package.json` 和 `package-lock.json` 的版本一致。首次发布使用 `1.0.0`，后续发布递增版本号。
+1. 确认 `package.json` 和 `package-lock.json` 的版本一致。当前更名版本使用 `1.0.2`，后续发布递增版本号。
 2. 完成源码审查和隐私检查，提交更改。
-3. 推送同版本标签（首次发布为 `v1.0.0`）。
+3. 推送同版本标签，例如 `v1.0.2`。
 4. `Windows release` 工作流运行单元测试、桌面集成测试及打包验证。
 5. 工作流先创建草稿并上传全部产物，成功后发布稳定 Release。
 

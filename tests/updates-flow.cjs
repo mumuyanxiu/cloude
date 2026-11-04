@@ -10,7 +10,7 @@ async function until(check, label) {
 }
 async function run() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-updates-flow-'));
-  process.env.CLOUD_CLAUDE_TEST = '1'; process.env.CLOUD_CLAUDE_DATA = directory;
+  process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = directory;
   const main = require('../electron/main.cjs');
   const config = { host: 'fixture', port: 22, username: 'fixture', authType: 'agent', workspace: '/home/fixture/workspace', claudePath: 'claude', autoConnect: true };
   const projectPath = `${config.workspace}/sample`;

@@ -18,8 +18,8 @@ async function until(check, label, timeout = 10000) {
 
 async function run() {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-renderer-flow-'));
-  process.env.CLOUD_CLAUDE_TEST = '1';
-  process.env.CLOUD_CLAUDE_DATA = path.join(temporaryRoot, 'state');
+  process.env.CLOUDE_TEST = '1';
+  process.env.CLOUDE_DATA = path.join(temporaryRoot, 'state');
   const outputDirectory = path.resolve(__dirname, '..', 'output');
   const main = require('../electron/main.cjs');
   const calls = { connect: [], mkdir: [], read: [], save: [], chat: [], commands: [], download: [] };

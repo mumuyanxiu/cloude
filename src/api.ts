@@ -2,7 +2,7 @@ import type { AppState, DesktopAPI } from './types';
 export const defaultConnection = { host: '', port: 22, username: '', authType: 'key' as const, privateKeyPath: '', workspace: '~/claude-workspace', claudePath: 'claude', autoConnect: true };
 export const emptyState: AppState = { connection: defaultConnection, projects: [], conversations: [] };
 export const isDesktop = !!window.workspace;
-const desktopOnly = async (): Promise<never> => { throw new Error('请在 Cloud Claude 桌面应用中使用此功能'); };
+const desktopOnly = async (): Promise<never> => { throw new Error('请在 Cloude 桌面应用中使用此功能'); };
 export const api: DesktopAPI = window.workspace ?? {
   loadState: async () => emptyState, saveState: async () => {}, onEvent: () => () => {},
   getUpdateState: async () => ({ status: 'unsupported', currentVersion: '', version: null, percent: 0, message: '' }),

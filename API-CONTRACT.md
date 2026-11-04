@@ -2,7 +2,7 @@
 
 Updates: getUpdateState(), checkForUpdates(), downloadUpdate() return {status,currentVersion,version,percent,message}. installUpdate() requires a verified downloaded update and no running tasks, connection changes or file operations, then disconnects SSH and drains persistence queues before quitAndInstall(true,true). The renderer disables install while files are dirty. openReleases() opens only the configured public release page. Events include {kind:'update',update:<state>}. Development builds return status unsupported. Installed Windows builds check once after startup; downloads and installation require a user action. autoInstallOnAppQuit is disabled. The update provider is fixed in build metadata, never supplied by the renderer.
 
-App data: CLOUD_CLAUDE_DATA overrides the data directory for isolated tests. Packaged builds use the stable Cloud Claude profile.
+App data. CLOUDE_DATA overrides the data directory for isolated tests, with CLOUD_CLAUDE_DATA accepted as a legacy alias. CLOUDE_TEST enables integration test mode, with CLOUD_CLAUDE_TEST accepted as a legacy alias. Cloude packaged builds use the existing `%APPDATA%/Cloud Claude/` profile for upgrade continuity.
 
 Desktop preload exposes `window.workspace`, all methods return Promises and reject on errors. Events use onEvent(callback) returning unsubscribe. No local filesystem or shell access from renderer. Remote service is CommonJS RemoteClient class in electron/remote.cjs.
 

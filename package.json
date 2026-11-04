@@ -1,14 +1,14 @@
 {
-  "name": "cloud-claude",
-  "version": "1.0.1",
+  "name": "cloude",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
-  "description": "Windows desktop workspace for remote Claude Code projects",
+  "description": "Cloude desktop workspace for remote Claude Code projects",
   "repository": {
     "type": "git",
     "url": "https://github.com/mumuyanxiu/cloude.git"
   },
-  "author": "Cloud Claude contributors",
+  "author": "Cloude contributors",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -44,7 +44,7 @@
   },
   "build": {
     "appId": "io.github.cloudclaude.desktop",
-    "productName": "Cloud Claude",
+    "productName": "Cloude",
     "directories": {
       "output": "release/${version}"
     },
@@ -62,12 +62,13 @@
       "icon": "assets/claude-icon.png"
     },
     "nsis": {
-      "artifactName": "Cloud-Claude-Setup-${version}.exe",
+      "artifactName": "Cloude-Setup-${version}.exe",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "include": "scripts/installer.nsh"
     },
     "publish": [
       {

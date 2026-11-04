@@ -12,4 +12,4 @@
 
 原始应用图标 PNG SHA256：`20EAFE9635730436158B4D0A9C9419ADA40069708C89620EC8773EE8EC6E5621`
 
-Claude 图标及商标归 Anthropic 所有；Cloud Claude 是本地自用的独立远程工作台。
+Claude 图标及商标归 Anthropic 所有。Cloude 是本地自用的独立远程工作台。
