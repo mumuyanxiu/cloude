@@ -42,7 +42,9 @@ test('remote history command is quoted, read-only and never starts Claude', asyn
 });
 
 test('transcript reader lists matching sessions and previews the active branch with bounded text', async t => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-session-reader-'));
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-session-reader-'));
+  // Windows TEMP can use an 8.3 alias; the reader derives its slug from the real project path.
+  const root = await fs.realpath(temporaryRoot);
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, 'original-project');
   const config = path.join(root, 'claude');
