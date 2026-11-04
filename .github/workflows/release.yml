@@ -34,7 +34,6 @@ jobs:
           path: |
             release/*/Cloude-Setup-*.exe
             release/*/Cloude-Setup-*.exe.blockmap
-            release/*/Cloud-Claude-Setup-*.exe
             release/**/latest.yml
             release/**/SHA256SUMS.txt
             output/release-verification.json
@@ -49,7 +48,6 @@ jobs:
           $assets = @(
             "$directory/Cloude-Setup-$version.exe",
             "$directory/Cloude-Setup-$version.exe.blockmap",
-            "$directory/Cloud-Claude-Setup-$version.exe",
             "$directory/latest.yml",
             "$directory/SHA256SUMS.txt",
             'scripts/update-windows.ps1'

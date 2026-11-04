@@ -39,10 +39,9 @@ assert.equal(metadata.sha512, crypto.createHash('sha512').update(bytes).digest('
 assert.equal(metadata.files[0].size, bytes.length);
 assert.equal(metadata.files[0].sha512, metadata.sha512);
 const checksums = fs.readFileSync(path.join(releaseDirectory, 'SHA256SUMS.txt'), 'utf8').trim().split(/\r?\n/);
-assert.equal(checksums.length, 4);
-const expectedNames = [installerName, `${installerName}.blockmap`, `Cloud-Claude-Setup-${version}.exe`, 'latest.yml'].sort();
+assert.equal(checksums.length, 3);
+const expectedNames = [installerName, `${installerName}.blockmap`, 'latest.yml'].sort();
 assert.deepEqual(checksums.map(line => line.slice(66)).sort(), expectedNames);
-assert.ok(fs.readFileSync(path.join(releaseDirectory, `Cloud-Claude-Setup-${version}.exe`)).equals(bytes), 'Legacy installer alias must contain the same Cloude installer');
 for (const line of checksums) {
   const match = /^([a-f0-9]{64})  ([A-Za-z0-9.-]+)$/.exec(line);
   assert.ok(match, 'Invalid checksum entry');
