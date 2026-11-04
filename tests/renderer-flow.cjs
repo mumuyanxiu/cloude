@@ -22,6 +22,8 @@ async function run() {
   process.env.CLOUDE_DATA = path.join(temporaryRoot, 'state');
   const outputDirectory = path.resolve(__dirname, '..', 'output');
   const main = require('../electron/main.cjs');
+  const loadLegacyState = main.store.load.bind(main.store);
+  main.store.load = async () => { const state = await loadLegacyState(); return { ...state, settings: { ...state.settings, durableTasks: false } }; };
   const calls = { connect: [], mkdir: [], read: [], save: [], chat: [], commands: [], download: [] };
   const root = '/home/fixture/claude-workspace';
   const project = `${root}/sample-project`;

@@ -1,0 +1,178 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const { app, clipboard, ClipboardItem, dialog, shell } = require('electron');
+const { LocalSftp } = require('./helpers/local-sftp.cjs');
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check, label) { for (let i = 0; i < 250; i++) { if (await check()) return; await pause(40); } throw new Error('Timed out: ' + label); }
+
+async function run() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cloude-features-flow-'));
+  process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = path.join(root, 'state');
+  const original = [];
+  for (const item of await clipboard.read()) { const values = {}; for (const type of item.types) { try { values[type] = await item.getType(type); } catch {} } if (Object.keys(values).length) original.push(new ClipboardItem(values)); }
+  const main = require('../electron/main.cjs');
+  const projectPath = '/home/tester/work/project';
+  const sftp = new LocalSftp(path.join(root, 'remote'));
+  await fs.mkdir(sftp.native(projectPath), { recursive: true });
+  await fs.mkdir(sftp.native(projectPath + '/results'));
+  await fs.writeFile(sftp.native(projectPath + '/main.py'), 'print("fixture")\n');
+  await fs.writeFile(sftp.native(projectPath + '/results/report.txt'), 'bundle fixture');
+  const png = await fs.readFile(path.resolve('assets/claude-icon.png'));
+  const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+  let clipboardPng;
+  await fs.writeFile(sftp.native(projectPath + '/figure.png'), png);
+  const config = { host: 'fixture', port: 22, username: 'tester', authType: 'agent', workspace: '/home/tester/work', claudePath: 'claude', autoConnect: true };
+  await main.store.save({ connection: config, projects: [{ id: 'project', name: 'project', path: projectPath, connectionKey: 'tester@fixture:22:/home/tester/work' }], conversations: [], settings: { durableTasks: false } });
+  main.remote.clientFactory = () => { throw new Error('Real user SSH forbidden'); };
+  main.remote.connect = async () => { main.remote.client = {}; main.remote.sftp = sftp; main.remote.home = '/home/tester'; main.remote.workspace = '/home/tester/work'; main.remote.workspaceInput = '/home/tester/work'; return { home: '/home/tester', workspace: '/home/tester/work', hostname: 'fixture', claudeAvailable: true }; };
+  main.remote.disconnect = async () => { main.remote._emit({ kind: 'connection', status: 'disconnected' }); };
+  main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now() });
+  const calls = { chat: [], terminal: [], resize: [], input: [], external: [], opened: [], replies: [], stops: [] };
+  main.remote.startChat = async options => { calls.chat.push(options); setTimeout(() => { main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'event', event: { type: 'result', subtype: 'success', result: '已查看图片。', session_id: 'fixture-session' } }); main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'exit', code: 0 }); }, 50); return { jobId: options.jobId }; };
+  main.remote.openTerminal = async options => { calls.terminal.push(options); setTimeout(() => main.remote._emit({ kind: 'terminal', jobId: options.jobId, type: 'data', data: options.login ? 'Open https://claude.ai/oauth/authorize?fixture=1\r\nCode: ' : '\x1b[32mfixture shell\x1b[0m\r\n' }), 50); return { jobId: options.jobId }; };
+  main.remote.resizeTerminal = async options => { calls.resize.push(options); };
+  main.remote.writeJob = async (jobId, data) => { calls.input.push({ jobId, data }); };
+  main.remote.stopJob = async jobId => { calls.stops.push(jobId); main.remote._emit({ kind: 'terminal', jobId, type: 'exit', code: 0 }); };
+  shell.openExternal = async url => { calls.external.push(url); };
+  shell.openPath = async file => { calls.opened.push(file); return ''; };
+  const zipPath = path.join(root, 'results.zip');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: zipPath });
+  dialog.showMessageBoxSync = () => 1;
+  const window = await main.ready; window.webContents.setBackgroundThrottling(false);
+  const evaluate = code => window.webContents.executeJavaScript(code).catch(error => { throw new Error(`${error.message}: ${code.slice(0, 200)}`); });
+  const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const exists = selector => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`);
+  const fill = async (selector, value) => { await evaluate(`(() => { const e=document.querySelector(${JSON.stringify(selector)}); const p=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(p,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true})); })()`); await pause(50); };
+  const invoke = (method, value) => evaluate(`window.workspace[${JSON.stringify(method)}](${value === undefined ? '' : JSON.stringify(value)})`);
+  const checks = [];
+  const check = async (name, action) => { console.log('CHECK ' + name); await action(); checks.push(name); console.log('PASS ' + name); };
+  try {
+    await until(() => evaluate('document.querySelector(".connection-button").textContent === "已连接"'), 'connection');
+    await check('native clipboard image becomes an attachment and image-only send uploads exact bytes', async () => {
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
+      const copied = (await clipboard.read()).find(item => item.types.includes('image/png'));
+      clipboardPng = Buffer.from(await (await copied.getType('image/png')).arrayBuffer());
+      await click('[aria-label="粘贴图片或文件"]');
+      await until(() => exists('.attachment-chip img'), 'clipboard preview');
+      assert.equal(await evaluate('document.querySelector("[aria-label=发送消息]").disabled'), false);
+      await click('[aria-label="发送消息"]');
+      await until(() => calls.chat.length === 1, 'image send');
+      const state = await main.store.load();
+      await until(async () => (await main.store.load()).conversations[0]?.messages[0]?.attachments?.length === 1, 'attachment persistence');
+      const attachment = (await main.store.load()).conversations[0].messages[0].attachments[0];
+      assert.equal(digest(await fs.readFile(sftp.native(attachment.path))), digest(clipboardPng));
+      assert.ok(calls.chat[0].prompt.includes(attachment.path));
+      assert.equal(attachment.preview, undefined);
+      await until(() => exists('.user-message .remote-image img'), 'sent image preview');
+    });
+    await check('image preview supports native clipboard copy and local application opening', async () => {
+      await click('.user-message .remote-image button');
+      await until(() => exists('.image-preview img'), 'preview');
+      await evaluate('[...document.querySelectorAll(".media-actions button")].find(b=>b.textContent.includes("复制图片")).click()');
+      await until(() => evaluate('document.querySelector(".media-actions").textContent.includes("已复制")'), 'copy');
+      assert.ok((await clipboard.read()).some(item => item.types.includes('image/png')));
+      await evaluate('[...document.querySelectorAll(".media-actions button")].find(b=>b.textContent.includes("本地应用打开")).click()');
+      await until(() => calls.opened.length === 1, 'local open');
+      assert.equal(digest(await fs.readFile(calls.opened[0])), digest(clipboardPng));
+      await click('[aria-label="关闭窗口"]');
+    });
+    await check('paste event carries a virtual image through the isolated preload and leaves text paste intact', async () => {
+      await evaluate(`(() => { const input=document.querySelector('.composer textarea'); const data=new DataTransfer(); data.items.add(new File([new Uint8Array(${JSON.stringify([...png])})], 'clipboard.png', {type:'image/png'})); input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})); })()`);
+      await until(() => exists('.attachment-chip img'), 'paste event attachment');
+      await click('.attachment-chip button');
+      assert.equal(await evaluate(`(() => { const data=new DataTransfer();data.setData('text/plain','hello');const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});document.querySelector('.composer textarea').dispatchEvent(event);return event.defaultPrevented;})()`), false);
+    });
+    await check('file references search and directory bundle use the real SFTP-backed implementation', async () => {
+      await click('[aria-label="搜索并引用项目文件"]');
+      await fill('[aria-label="搜索项目文件"]', 'main.py');
+      await until(() => evaluate('document.querySelector(".file-picker-list")?.textContent.includes("main.py")'), 'file search');
+      await click('.file-picker-list button');
+      assert.ok(await exists('.references'));
+      const bundle = await invoke('downloadBundle', { path: projectPath + '/results' });
+      assert.equal(bundle.files, 1); assert.equal((await fs.readFile(zipPath)).subarray(0, 2).toString(), 'PK');
+    });
+    await check('Windows Explorer file clipboard preserves a Unicode filename', async () => {
+      const file = path.join(root, '测试日志.txt'); await fs.writeFile(file, 'file clipboard fixture');
+      const script = '[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false); Add-Type -AssemblyName System.Windows.Forms; $items = New-Object System.Collections.Specialized.StringCollection; foreach ($p in (ConvertFrom-Json ([Console]::In.ReadToEnd()))) { [void]$items.Add($p) }; [System.Windows.Forms.Clipboard]::SetFileDropList($items)';
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', script], { input: JSON.stringify([file]), encoding: 'utf8', windowsHide: true });
+      assert.equal(result.status, 0, result.stderr);
+      await click('[aria-label="粘贴图片或文件"]');
+      await until(() => evaluate('document.querySelector(".attachment-chip")?.textContent.includes("测试日志.txt")'), 'Unicode copied file');
+      await click('.attachment-chip button');
+    });
+    await check('xterm receives raw ANSI data, resizes, accepts input, and opens auth in local browser', async () => {
+      await click('[aria-label="打开交互终端"]');
+      await until(() => exists('.xterm-screen'), 'xterm'); await until(() => calls.resize.length > 0, 'terminal resize');
+      await evaluate('document.querySelector(".xterm-helper-textarea").focus()');
+      window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'a' }); window.webContents.sendInputEvent({ type: 'char', keyCode: 'a' }); window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'a' });
+      await until(() => calls.input.some(item => item.data === 'a'), 'raw terminal input');
+      await click('[aria-label="关闭交互终端"]');
+      await click('[aria-label="登录远端 Claude"]');
+      await until(() => exists('.terminal-links button'), 'auth link');
+      await click('.terminal-links button');
+      assert.equal(calls.external.at(-1), 'https://claude.ai/oauth/authorize?fixture=1');
+      assert.equal(calls.terminal.at(-1).login, true);
+      await click('[aria-label="关闭交互终端"]');
+    });
+    await check('durable tasks survive UI disconnect, repeated attach and completed replay without reexecution', async () => {
+      let task; let starts = 0; let polls = 0; const events = [];
+      main.remote.startPersistentChat = async options => {
+        starts++;
+        task = { jobId: options.jobId, conversationId: options.conversationId, projectPath, title: 'Fixture question', state: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), pendingRequests: [{ type: 'control_request', request_id: 'question', request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions: [{ question: 'Choose a format', options: [{ label: 'PNG' }, { label: 'JPEG' }] }] } } }] };
+        events.push({ type: 'event', event: { type: 'system', subtype: 'init', session_id: 'durable-session' } });
+        return { jobId: options.jobId };
+      };
+      main.remote.listTasks = async () => ({ tasks: [task] });
+      main.remote.pollTask = async options => { polls++; return { task, events: events.slice(options.cursor), cursor: events.length, more: false }; };
+      main.remote.replyTask = async options => { calls.replies.push(options); task = { ...task, state: 'completed', pendingRequests: [], sessionId: 'durable-session' }; events.push({ type: 'event', event: { type: 'assistant', message: { content: [{ type: 'text', text: 'Answered once.' }] } } }, { type: 'event', event: { type: 'result', subtype: 'success', session_id: 'durable-session' } }); };
+      await click('.composer-feature-options input');
+      await fill('.composer textarea', 'Ask a fixture question'); await click('[aria-label="发送消息"]');
+      await until(() => exists('.request-card'), 'question card');
+      await click('[aria-label="远端任务与恢复"]');
+      await until(() => exists('.task-list .secondary-button'), 'running task list');
+      await click('.task-list .secondary-button');
+      const beforeRepeatedAttach = polls;
+      await until(() => polls > beforeRepeatedAttach, 'same task continues polling after attach');
+      await invoke('disconnect');
+      await until(() => evaluate('document.querySelector(".connection-button").textContent === "连接设备"'), 'disconnected UI');
+      assert.equal(await exists('.request-card'), false);
+      await click('.connection-button');
+      await click('.modal form .primary-button');
+      await until(() => evaluate('document.querySelector(".connection-button").textContent === "已连接"'), 'reconnected UI');
+      await until(() => exists('.request-card'), 'restored question card');
+      const beforeReconnect = polls;
+      await until(() => polls > beforeReconnect, 'recovered task continues polling');
+      assert.equal(starts, 1, 'reconnect must not resubmit the prompt');
+      await click('.request-card input[type=radio]');
+      await click('.request-actions .primary-button');
+      await until(() => calls.replies.length === 1, 'answer submitted');
+      assert.equal(calls.replies[0].answers['Choose a format'], 'PNG');
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Answered once.")'), 'durable completion');
+      await until(async () => (await main.store.load()).conversations.some(c => c.task?.finished), 'finished state');
+      const saved = await main.store.load();
+      assert.equal(saved.conversations.at(-1).messages.filter(m => m.content.includes('Answered once.')).length, 1);
+      await click('[aria-label="远端任务与恢复"]');
+      await until(() => exists('.task-list .secondary-button'), 'completed task list');
+      await click('.task-list .secondary-button');
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Answered once.")'), 'completed task replay');
+      await until(async () => (await main.store.load()).conversations.at(-1).task?.finished, 'replay finished state');
+      assert.equal((await main.store.load()).conversations.at(-1).messages.filter(m => m.content.includes('Answered once.')).length, 1);
+      assert.equal(starts, 1);
+      await until(async () => !(await exists('.request-card')) && await exists('[aria-label="发送消息"]'), 'completed UI');
+      await pause(150);
+      await fs.writeFile(path.resolve('output/features-fixture.png'), (await window.webContents.capturePage()).toPNG());
+    });
+    const report = { passed: checks.length, checks, actualElectronIPC: true, actualClipboard: true, sftpBoundary: 'LocalSftp', actualClaudeInference: false };
+    await fs.writeFile(path.resolve('output/features-flow.json'), JSON.stringify(report, null, 2));
+    console.log(JSON.stringify(report));
+  } finally {
+    if (original.length) await clipboard.write(original).catch(() => {}); else clipboard.clear();
+    main.remote.disconnect = async () => {};
+  }
+}
+run().then(() => app.exit(0)).catch(error => { console.error(error.stack || error); app.exit(1); });

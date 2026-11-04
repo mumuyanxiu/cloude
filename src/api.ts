@@ -4,6 +4,11 @@ export const emptyState: AppState = { connection: defaultConnection, projects: [
 export const isDesktop = !!window.workspace;
 const desktopOnly = async (): Promise<never> => { throw new Error('请在 Cloude 桌面应用中使用此功能'); };
 export const api: DesktopAPI = window.workspace ?? {
+  stageClipboard: desktopOnly, stageDropped: desktopOnly, discardAttachments: desktopOnly, uploadAttachments: desktopOnly,
+  readMedia: desktopOnly, copyImage: desktopOnly, copyText: desktopOnly, searchFiles: desktopOnly,
+  openTerminal: desktopOnly, resizeTerminal: desktopOnly, forwardPort: desktopOnly, listPorts: desktopOnly, closePort: desktopOnly,
+  startPersistentChat: desktopOnly, listTasks: desktopOnly, pollTask: desktopOnly, replyTask: desktopOnly, stopTask: desktopOnly,
+  notifyTask: desktopOnly, openLocalFile: desktopOnly, downloadBundle: desktopOnly,
   loadState: async () => emptyState, saveState: async () => {}, onEvent: () => () => {},
   getUpdateState: async () => ({ status: 'unsupported', currentVersion: '', version: null, percent: 0, message: '' }),
   checkForUpdates: desktopOnly, downloadUpdate: desktopOnly, installUpdate: desktopOnly, openReleases: desktopOnly,

@@ -5,10 +5,14 @@ export interface ConnectionConfig {
 }
 export interface Project { id: string; name: string; path: string; connectionKey?: string }
 export interface ToolCall { id: string; name: string; input?: unknown; result?: string }
-export interface Message { id: string; role: 'user' | 'assistant'; content: string; tools?: ToolCall[]; files?: string[]; error?: boolean }
-export interface Conversation { id: string; projectId: string; title: string; sessionId?: string; messages: Message[]; updatedAt: number; historyNotice?: string }
+export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; size: number; mime?: string; preview?: string; path?: string }
+export interface Message { id: string; role: 'user' | 'assistant'; content: string; tools?: ToolCall[]; files?: string[]; attachments?: Attachment[]; error?: boolean; jobId?: string }
+export interface Conversation { id: string; projectId: string; title: string; sessionId?: string; messages: Message[]; updatedAt: number; historyNotice?: string; task?: { jobId: string; messageId: string; cursor: number; finished?: boolean } }
+export interface PermissionRequest { type: string; request_id: string; request: { subtype: string; tool_name: string; input: Record<string, any>; decision_reason?: string } }
+export interface RemoteTask { jobId: string; conversationId: string; projectPath: string; title: string; state: 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'interrupted'; createdAt: number; updatedAt: number; sessionId?: string; pendingRequests: PermissionRequest[]; message?: string; exitCode?: number }
+export interface PortForward { id: string; remotePort: number; localPort: number; url: string }
 export interface RemoteSession { sessionId: string; title: string; updatedAt: number }
-export interface AppState { connection: ConnectionConfig; projects: Project[]; conversations: Conversation[]; settings?: { activeProjectId?: string; activeConversationId?: string; panelWidth?: number; allowCommands?: boolean } }
+export interface AppState { connection: ConnectionConfig; projects: Project[]; conversations: Conversation[]; settings?: { activeProjectId?: string; activeConversationId?: string; panelWidth?: number; allowCommands?: boolean; durableTasks?: boolean; askCommands?: boolean; notifications?: boolean } }
 export interface FileEntry { name: string; path: string; type: 'directory' | 'file' | 'symlink'; size: number; mtime: number }
 export interface ConnectionInfo { home: string; workspace: string; hostname: string; claudeVersion: string; claudeAvailable: boolean; warning?: string; credentialSaved?: boolean }
 export interface AccountUsage {
@@ -22,7 +26,7 @@ export interface UpdateState {
   currentVersion: string; version: string | null; percent: number; message: string;
 }
 export interface RemoteEvent {
-  kind: 'connection' | 'chat' | 'terminal' | 'transfer' | 'update';
+  kind: 'connection' | 'chat' | 'terminal' | 'transfer' | 'update' | 'navigate' | 'tunnel';
   update?: UpdateState;
   status?: string; message?: string; jobId?: string; conversationId?: string;
   type?: string; event?: Record<string, any>; data?: string; code?: number | null; signal?: string; stopped?: boolean;
@@ -38,6 +42,27 @@ export interface UploadProgressData {
   fileTransferred?: number; fileTotal?: number; updatedAt: number; startedAt: number; transferStartedAt?: number;
 }
 export interface DesktopAPI {
+  stageClipboard(): Promise<Attachment[]>;
+  stageDropped(files: File[]): Promise<Attachment[]>;
+  discardAttachments(options: { ids: string[] }): Promise<void>;
+  uploadAttachments(options: { ids: string[]; projectPath: string }): Promise<Attachment[]>;
+  readMedia(options: { path: string }): Promise<{ path: string; mime: string; size: number; dataUrl: string }>;
+  copyImage(options: { path: string }): Promise<void>;
+  copyText(options: { text: string }): Promise<void>;
+  searchFiles(options: { projectPath: string; query: string }): Promise<{ files: FileEntry[]; truncated: boolean }>;
+  openTerminal(options: { jobId: string; projectPath: string; cols?: number; rows?: number; login?: boolean }): Promise<{ jobId: string }>;
+  resizeTerminal(options: { jobId: string; cols: number; rows: number }): Promise<void>;
+  forwardPort(options: { remotePort: number; localPort?: number }): Promise<PortForward>;
+  listPorts(): Promise<PortForward[]>;
+  closePort(options: { id: string }): Promise<void>;
+  startPersistentChat(options: { jobId: string; conversationId: string; projectPath: string; prompt: string; sessionId?: string; mode: 'plan' | 'edit'; allowCommands?: boolean; askCommands?: boolean }): Promise<{ jobId: string }>;
+  listTasks(options: { projectPath: string }): Promise<{ tasks: RemoteTask[] }>;
+  pollTask(options: { projectPath: string; jobId: string; cursor: number }): Promise<{ task: RemoteTask; events: Array<{ type: string; event?: Record<string, any>; data?: string }>; cursor: number; more: boolean }>;
+  replyTask(options: { projectPath: string; jobId: string; requestId: string; allow: boolean; answers?: Record<string, string> }): Promise<void>;
+  stopTask(options: { projectPath: string; jobId: string }): Promise<void>;
+  notifyTask(options: { jobId: string; state: string; title: string; conversationId: string; requestId?: string }): Promise<void>;
+  openLocalFile(options: { path: string }): Promise<{ name: string }>;
+  downloadBundle(options: { path: string }): Promise<{ canceled: boolean; files?: number }>;
   getUpdateState(): Promise<UpdateState>; checkForUpdates(): Promise<UpdateState>;
   downloadUpdate(): Promise<UpdateState>; installUpdate(): Promise<void>; openReleases(): Promise<void>;
   loadState(): Promise<AppState>; saveState(state: AppState): Promise<void>;

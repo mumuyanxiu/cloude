@@ -38,6 +38,8 @@ async function run() {
   shell.openExternal = unexpected; shell.showItemInFolder = unexpected;
   const calls = { connect: 0, chat: [], commands: [], writes: [] };
   const main = require('../electron/main.cjs');
+  const loadLegacyState = main.store.load.bind(main.store);
+  main.store.load = async () => { const state = await loadLegacyState(); return { ...state, settings: { ...state.settings, durableTasks: false } }; };
   main.remote.clientFactory = () => { throw new Error('Real SSH forbidden in commands-flow test'); };
   main.remote.connect = async () => { calls.connect++; return { home: '/home/fixture', workspace, hostname: config.host, claudeAvailable: true, claudeVersion: 'fixture-only' }; };
   main.remote.disconnect = async () => {};

@@ -55,6 +55,8 @@ async function run() {
   dialog.showSaveDialog = unexpected; dialog.showMessageBoxSync = unexpected;
   shell.openExternal = unexpected; shell.showItemInFolder = unexpected;
   const main = require('../electron/main.cjs');
+  const loadLegacyState = main.store.load.bind(main.store);
+  main.store.load = async () => { const state = await loadLegacyState(); return { ...state, settings: { ...state.settings, durableTasks: false } }; };
   let adapter;
   const connectFixture = () => {
     adapter = new LocalSftp(remoteRoot);

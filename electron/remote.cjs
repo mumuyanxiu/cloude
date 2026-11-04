@@ -226,6 +226,7 @@ class RemoteClient {
   }
 
   async disconnect() {
+    this.closePorts();
     ++this.generation;
     this.usageCache = null; this.usageFlight = null; this.claudeVersion = '';
     const client = this.client;
@@ -241,6 +242,7 @@ class RemoteClient {
   }
 
   _finishLostJobs() {
+    this.closePorts();
     for (const job of [...this.jobs.values()]) {
       job.emit({ type: 'error', data: '连接中断，远端任务状态未知；重连不会自动重复执行任务。' });
       job.finish(null, 'CONNECTION_LOST');
@@ -554,7 +556,7 @@ class RemoteClient {
     } finally { if (source) await source.close().catch(() => {}); }
   }
 
-  _execCapture(command, { maxBytes = 4 * 1024 * 1024, timeout = 20000 } = {}) {
+  _execCapture(command, { maxBytes = 4 * 1024 * 1024, timeout = 20000, input } = {}) {
     this._assertContext();
     const client = this.client;
     if (!client) return Promise.reject(new Error('SSH 未连接。'));
@@ -574,7 +576,7 @@ class RemoteClient {
           stdout += outDecoder.end(); stderr += errDecoder.end();
           resolve({ stdout, stderr, code: typeof exitCode === 'number' ? exitCode : code });
         });
-        channel.end();
+        channel.end(input);
       });
     });
   }
@@ -686,8 +688,9 @@ class RemoteClient {
 }
 
 // Every public asynchronous operation stays bound to the connection it began on.
+require('./remote-features.cjs').installRemoteFeatures(RemoteClient, shellQuote);
 // This also protects library callers independently of the desktop's busy-operation UI.
-for (const method of ['openProject', 'listSessions', 'readSession', 'resolvePath', 'listFiles', 'readFile', 'saveFile', 'mkdir', 'inspectUploadPath', 'mkdirUploadDirectory', 'download', 'upload', 'getDiff', 'getUsage', 'startChat', 'runCommand']) {
+for (const method of ['readMedia', 'searchFiles', 'openTerminal', 'forwardPort', 'taskRequest', 'listTasks', 'pollTask', 'replyTask', 'stopTask', 'startPersistentChat', 'openProject', 'listSessions', 'readSession', 'resolvePath', 'listFiles', 'readFile', 'saveFile', 'mkdir', 'inspectUploadPath', 'mkdirUploadDirectory', 'download', 'upload', 'getDiff', 'getUsage', 'startChat', 'runCommand']) {
   const implementation = RemoteClient.prototype[method];
   RemoteClient.prototype[method] = function (...args) {
     if (this.operationContext.getStore()) return implementation.apply(this, args);

@@ -1,6 +1,6 @@
 # Windows 发布流程
 
-Cloude 品牌更名版本为 **1.0.2**，应用更新源由 `package.json` 的 `build.publish` 指定。
+当前功能版本为 **1.1.0**，应用更新源由 `package.json` 的 `build.publish` 指定，发布说明取自 `CHANGELOG.md`。
 
 ## 本地构建
 
@@ -17,10 +17,10 @@ npm run package
 
 ## GitHub Actions
 
-1. 确认 `package.json` 和 `package-lock.json` 的版本一致。当前更名版本使用 `1.0.2`，后续发布递增版本号。
+1. 确认 `package.json` 和 `package-lock.json` 的版本一致。当前版本使用 `1.1.0`，后续发布递增版本号。
 2. 完成源码审查和隐私检查，提交更改。
-3. 推送同版本标签，例如 `v1.0.2`。
-4. `Windows release` 工作流运行单元测试、桌面集成测试及打包验证。
+3. 推送同版本标签，例如 `v1.1.0`。
+4. `Windows release` 工作流运行 Linux 后台任务测试、Windows 单元测试、桌面集成测试及打包验证。
 5. 工作流先创建草稿并上传全部产物，成功后发布稳定 Release。
 
 手动运行工作流只生成 Actions 附件，不发布 Release。发布只使用工作流内置 `GITHUB_TOKEN`，不在仓库保存访问令牌。

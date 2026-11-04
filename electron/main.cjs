@@ -11,6 +11,7 @@ const { UpdateService } = require('./updates.cjs');
 
 const testMode = process.env.CLOUDE_TEST || process.env.CLOUD_CLAUDE_TEST;
 app.setName('Cloude');
+if (process.platform === 'win32') app.setAppUserModelId('io.github.cloudclaude.desktop');
 // Reuse the established profile so renamed builds can read existing settings and credentials.
 const dataDirectory = process.env.CLOUDE_DATA || process.env.CLOUD_CLAUDE_DATA || (app.isPackaged ? path.join(app.getPath('appData'), 'Cloud Claude') : path.join(__dirname, '..', '.runtime'));
 app.setPath('userData', dataDirectory);
@@ -249,6 +250,12 @@ handle('openExternal', async value => {
   return shell.openExternal(url.href);
 });
 
+const features = require('./desktop-features.cjs').registerDesktopFeatures({
+  electron: require('electron'), remote, handle, handleRemote, getWindow: () => window,
+  dataDirectory, getConnectionVersion: () => connectionVersion, isConnected: () => !!activeConfig,
+  send, startTerminal: value => start('openTerminal', value),
+});
+
 async function createWindow() {
   hostKeys = await store.read('known-hosts.json', {});
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -288,4 +295,4 @@ app.on('before-quit', event => {
     app.quit();
   });
 });
-module.exports = { ready, getWindow: () => window, remote, store, credentials, updates };
+module.exports = { ready, getWindow: () => window, remote, store, credentials, updates, features };

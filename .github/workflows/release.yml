@@ -6,7 +6,14 @@ on:
 permissions:
   contents: write
 jobs:
+  linux-tasks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify detached tasks and interactive protocol
+        run: python3 tests/task-runner-test.py
   windows:
+    needs: linux-tasks
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +61,7 @@ jobs:
           )
           # Upload while hidden, then expose metadata and binaries together.
           $notesFile = Join-Path $env:RUNNER_TEMP 'cloude-release-notes.txt'
-          "Cloude $version`n`nWindows installer with in-app updates. Workspace settings are preserved during updates. SHA256 checksums are attached." | Set-Content -LiteralPath $notesFile -Encoding utf8
+          Get-Content -LiteralPath CHANGELOG.md -Raw | Set-Content -LiteralPath $notesFile -Encoding utf8
           gh release create $env:GITHUB_REF_NAME --draft --verify-tag --title "Cloude $version" --notes-file $notesFile @assets
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
