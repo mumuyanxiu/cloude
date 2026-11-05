@@ -7,13 +7,22 @@ import './usage.css';
 type UsagePanelProps = { connectionKey: string | null; refreshToken: number; visible: boolean; revealToken?: number };
 const refreshInterval = 5 * 60 * 1000;
 const percentage = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 });
+const usageTimeZone = 'Asia/Shanghai';
+
+function fullTimeLabel(value: string | number | null) {
+  if (value === null) return undefined;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? `${date.toLocaleString('zh-CN', { timeZone: usageTimeZone, hour12: false })}（UTC+8）`
+    : undefined;
+}
 
 function resetLabel(value: string | null, now: number) {
   if (!value) return '重置时间未提供';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return '重置时间未提供';
   if (date.getTime() <= now) return '已到重置时间 · 待刷新';
-  return `重置于 ${date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  return `重置于 ${date.toLocaleString('zh-CN', { timeZone: usageTimeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}（UTC+8）`;
 }
 
 export function UsagePanel({ connectionKey, refreshToken, visible, revealToken = 0 }: UsagePanelProps) {
@@ -100,11 +109,11 @@ export function UsagePanel({ connectionKey, refreshToken, visible, revealToken =
           return <div className={`usage-limit ${limit.percent >= 90 ? 'near-limit' : ''}`} key={`${limit.kind}:${limit.group}:${index}`}>
             <div className="usage-limit-heading"><span title={limit.label}>{limit.label}</span><strong>{percent}<small>% 已用</small></strong></div>
             <div className="usage-meter" role="meter" aria-label={`${limit.label}已使用`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, limit.percent)} aria-valuetext={`${percent}% 已使用`}><span style={{ width: `${Math.min(100, limit.percent)}%` }} /></div>
-            <p className="usage-reset" title={limit.resetsAt ? new Date(limit.resetsAt).toLocaleString('zh-CN') : undefined}>{reset}</p>
+            <p className="usage-reset" title={fullTimeLabel(limit.resetsAt)}>{reset}</p>
           </div>;
         })}</div> : <p className={`usage-message ${error ? 'usage-error' : ''}`} role="status">{error || (loading ? '正在读取账户额度…' : '尚未读取账户额度')}</p>}
         {usage && error && <p className="usage-error usage-refresh-error" role="status"><strong>刷新失败</strong><span>{error}</span></p>}
-        {usage && <div className="usage-footer"><span title={updated?.toLocaleString('zh-CN')}>{updated ? `更新于 ${updated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}` : '更新时间未提供'}</span><span>{loading ? '刷新中…' : 'Claude 账户'}</span></div>}
+        {usage && <div className="usage-footer"><span title={fullTimeLabel(updated?.getTime() ?? null)}>{updated ? `更新于 ${updated.toLocaleTimeString('zh-CN', { timeZone: usageTimeZone, hour: '2-digit', minute: '2-digit', hour12: false })}（UTC+8）` : '更新时间未提供'}</span><span>{loading ? '刷新中…' : 'Claude 账户'}</span></div>}
       </>}
     </div>}
   </section>;

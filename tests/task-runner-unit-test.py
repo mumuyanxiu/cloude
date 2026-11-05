@@ -84,6 +84,23 @@ class Output(unittest.TestCase):
                     RUNNER.read_events(log, 0)
 
 
+class InferenceOptions(unittest.TestCase):
+    def test_default_and_explicit_model_effort_arguments(self):
+        defaults = {'executable': 'claude', 'mode': 'edit', 'sessionId': 'existing'}
+        args = RUNNER.claude_args(defaults)
+        self.assertNotIn('--model', args)
+        self.assertNotIn('--effort', args)
+        for effort in ('low', 'medium', 'high', 'xhigh', 'max'):
+            args = RUNNER.claude_args({**defaults, 'model': 'gateway/custom-model', 'effort': effort})
+            self.assertEqual(args[args.index('--model') + 1], 'gateway/custom-model')
+            self.assertEqual(args[args.index('--effort') + 1], effort)
+            self.assertEqual(args[args.index('--resume') + 1], 'existing')
+            self.assertNotIn('--permission-mode', args)
+        for invalid in ({'model': 'bad model'}, {'model': 'bad\nmodel'}, {'model': 'x' * 121}, {'effort': 'invalid'}):
+            with self.assertRaises(ValueError):
+                RUNNER.claude_args({**defaults, **invalid})
+
+
 class Permissions(unittest.TestCase):
     def test_default_and_legacy_preferences_inherit_remote_rules(self):
         for legacy in ({}, {'allowCommands': True}, {'allowCommands': False}, {'askCommands': True}):
@@ -131,7 +148,7 @@ class Permissions(unittest.TestCase):
 
 
 class Protocol(unittest.TestCase):
-    def run_worker(self, prompt):
+    def run_worker(self, prompt, inference=None, inspect_launch=None):
         temporary = tempfile.TemporaryDirectory(prefix='cloude-output-test-')
         self.addCleanup(temporary.cleanup)
         folder = Path(temporary.name)
@@ -139,11 +156,13 @@ class Protocol(unittest.TestCase):
         cli = folder / 'fake-claude.py'
         cli.write_text(FIXTURE.FAKE, encoding='utf-8')
         RUNNER.atomic_json(folder / 'config.json', {'executable': str(cli), 'projectPath': str(folder),
-                                                  'prompt': prompt, 'mode': 'edit', 'allowCommands': False})
+                                                  'prompt': prompt, 'mode': 'edit', 'allowCommands': False, **(inference or {})})
         RUNNER.atomic_json(folder / 'status.json', {'state': 'starting', 'createdAt': 0})
         real_popen = subprocess.Popen
 
         def launch(_args, **kwargs):
+            if inspect_launch:
+                inspect_launch(_args, kwargs['env'])
             child = real_popen([sys.executable, str(cli)], **kwargs)
             for stream in (child.stdin, child.stdout, child.stderr):
                 self.addCleanup(stream.close)
@@ -173,6 +192,20 @@ class Protocol(unittest.TestCase):
         self.assertLess((folder / 'events.jsonl').stat().st_size, 4096)
         image = next(row['event'] for row in records if row.get('event', {}).get('type') == 'user')
         self.assertEqual(image['message']['content'][0]['tool_use_id'], 'read-image')
+
+    def test_worker_preserves_remote_effort_unless_explicitly_selected(self):
+        def inherited(args, env):
+            self.assertEqual(env['CLAUDE_CODE_EFFORT_LEVEL'], 'low')
+            self.assertNotIn('--effort', args)
+
+        def selected(args, env):
+            self.assertEqual(env['CLAUDE_CODE_EFFORT_LEVEL'], 'high')
+            self.assertEqual(args[args.index('--effort') + 1], 'high')
+            self.assertEqual(args[args.index('--model') + 1], 'opus')
+
+        with patch.dict(RUNNER.os.environ, {'CLAUDE_CODE_EFFORT_LEVEL': 'low'}):
+            self.run_worker('image', inspect_launch=inherited)
+            self.run_worker('image', {'model': 'opus', 'effort': 'high'}, selected)
 
     def test_real_text_larger_than_the_old_ssh_capture_limit_is_recovered_intact(self):
         _folder, records = self.run_worker('long-text')

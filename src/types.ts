@@ -12,7 +12,8 @@ export interface PermissionRequest { type: string; request_id: string; request: 
 export interface RemoteTask { jobId: string; conversationId: string; projectPath: string; title: string; state: 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'interrupted'; createdAt: number; updatedAt: number; sessionId?: string; pendingRequests: PermissionRequest[]; message?: string; exitCode?: number }
 export interface PortForward { id: string; remotePort: number; localPort: number; url: string }
 export interface RemoteSession { sessionId: string; title: string; updatedAt: number }
-export interface AppState { connection: ConnectionConfig; projects: Project[]; conversations: Conversation[]; settings?: { activeProjectId?: string; activeConversationId?: string; panelWidth?: number; durableTasks?: boolean; notifications?: boolean } }
+export type ClaudeEffort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export interface AppState { connection: ConnectionConfig; projects: Project[]; conversations: Conversation[]; settings?: { activeProjectId?: string; activeConversationId?: string; panelWidth?: number; durableTasks?: boolean; notifications?: boolean; model?: string; customModel?: string; effort?: ClaudeEffort } }
 export interface FileEntry { name: string; path: string; type: 'directory' | 'file' | 'symlink'; size: number; mtime: number }
 export interface ConnectionInfo { home: string; workspace: string; hostname: string; claudeVersion: string; claudeAvailable: boolean; warning?: string; credentialSaved?: boolean }
 export interface AccountUsage {
@@ -55,7 +56,7 @@ export interface DesktopAPI {
   forwardPort(options: { remotePort: number; localPort?: number }): Promise<PortForward>;
   listPorts(): Promise<PortForward[]>;
   closePort(options: { id: string }): Promise<void>;
-  startPersistentChat(options: { jobId: string; conversationId: string; projectPath: string; prompt: string; sessionId?: string; mode: 'plan' | 'edit' }): Promise<{ jobId: string }>;
+  startPersistentChat(options: { jobId: string; conversationId: string; projectPath: string; prompt: string; sessionId?: string; mode: 'plan' | 'edit'; model?: string; effort?: ClaudeEffort }): Promise<{ jobId: string }>;
   listTasks(options: { projectPath: string }): Promise<{ tasks: RemoteTask[] }>;
   pollTask(options: { projectPath: string; jobId: string; cursor: number }): Promise<{ task: RemoteTask; events: Array<{ type: string; event?: Record<string, any>; data?: string }>; cursor: number; more: boolean }>;
   replyTask(options: { projectPath: string; jobId: string; requestId: string; allow: boolean; scope?: 'once' | 'project'; answers?: Record<string, string> }): Promise<void>;
@@ -77,7 +78,7 @@ export interface DesktopAPI {
   mkdir(options: { path: string }): Promise<{ path: string }>;
   download(options: { path: string }): Promise<{ canceled: boolean; localPath?: string; bytes?: number }>;
   upload(options: { directory: string; kind?: 'files' | 'folder' }): Promise<{ canceled: boolean; files?: string[]; folders?: string[] }>;
-  startChat(options: { jobId: string; conversationId: string; projectPath: string; prompt: string; sessionId?: string; mode: 'plan' | 'edit'; model?: string }): Promise<{ jobId: string }>;
+  startChat(options: { jobId: string; conversationId: string; projectPath: string; prompt: string; sessionId?: string; mode: 'plan' | 'edit'; model?: string; effort?: ClaudeEffort }): Promise<{ jobId: string }>;
   runCommand(options: { jobId: string; projectPath: string; command: string }): Promise<{ jobId: string }>;
   writeJob(options: { jobId: string; data: string }): Promise<void>; stopJob(options: { jobId: string }): Promise<void>;
   getDiff(options: { projectPath: string }): Promise<{ diff: string; isGit: boolean }>;

@@ -34,6 +34,7 @@ class Model(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        self.server.requests.append({'model': request.get('model'), 'effort': request.get('output_config', {}).get('effort')})
         results = sum(block.get('type') == 'tool_result' for message in request.get('messages', [])
                       if isinstance(message.get('content'), list) for block in message['content'])
         tool_available = any(tool.get('name') == 'Write' for tool in request.get('tools', []))
@@ -62,8 +63,8 @@ class Model(BaseHTTPRequestHandler):
         event('message_stop')
 
 
-def run_cli(executable, project, env, scope='once', mode='edit'):
-    child = subprocess.Popen(runner.claude_args({'executable': executable, 'mode': mode}) +
+def run_cli(executable, project, env, scope='once', mode='edit', **inference):
+    child = subprocess.Popen(runner.claude_args({'executable': executable, 'mode': mode, **inference}) +
                              ['--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'],
                              cwd=project, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              text=True, encoding='utf-8')
@@ -143,6 +144,7 @@ with TemporaryProject(prefix='cloude-permission-protocol-') as directory:
     settings = config / 'settings.json'
     server = ThreadingHTTPServer(('127.0.0.1', 0), Model)
     server.project = project
+    server.requests = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     env = {k: v for k, v in os.environ.items() if not k.startswith(('ANTHROPIC_', 'CLAUDE_'))}
     env.update(HOME=str(root), USERPROFILE=str(root), CLAUDE_CONFIG_DIR=str(config),
@@ -154,6 +156,10 @@ with TemporaryProject(prefix='cloude-permission-protocol-') as directory:
         settings.write_text(json.dumps({'disableAllHooks': True, 'permissions': {'defaultMode': mode, **permissions}}))
         marker.unlink(missing_ok=True)
     try:
+        configure('acceptEdits')
+        run_cli(sys.argv[1], project, {**env, 'CLAUDE_CODE_EFFORT_LEVEL': 'high'}, model='claude-opus-4-6', effort='high')
+        assert {'model': 'claude-opus-4-6', 'effort': 'high'} in server.requests, server.requests
+        print('PASS selected model and effort reach the model request through the native CLI', flush=True)
         configure('acceptEdits')
         assert run_cli(sys.argv[1], project, env) == []
         assert marker.read_text() == 'fixture'

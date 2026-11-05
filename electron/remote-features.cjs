@@ -17,8 +17,18 @@ function portNumber(value, allowZero = false) {
   return value;
 }
 
-function installRemoteFeatures(RemoteClient, shellQuote) {
+function installRemoteFeatures(RemoteClient, shellQuote, inferenceOptions) {
   Object.assign(RemoteClient.prototype, {
+    async checkInferenceOptions(options) {
+      const selected = inferenceOptions(options);
+      if (selected.effort) {
+        const help = await this._execCapture(`export PATH="$HOME/.local/bin:$PATH"; ${shellQuote(this.claudePath)} --help`, { timeout: 15000 });
+        const section = help.stdout.match(/^[ \t]*--effort\b[^\n]*(?:\n(?![ \t]*-)[ \t]+[^\n]*)*/m)?.[0] || '';
+        const supported = section.match(/\b(?:low|medium|high|xhigh|max)\b/g) || [];
+        if (help.code !== 0 || !supported.includes(selected.effort)) throw new Error(`远端 Claude CLI 不支持或未列出 ${selected.effort} 思考强度，请更新 CLI 或选择“跟随远端”。`);
+      }
+      return selected;
+    },
     async readMedia(value) {
       const target = await this.resolvePath(value);
       const stat = await this._sftpCall('stat', target);
@@ -106,8 +116,9 @@ function installRemoteFeatures(RemoteClient, shellQuote) {
     async startPersistentChat(options) {
       if (typeof options.prompt !== 'string' || !options.prompt.trim() || Buffer.byteLength(options.prompt) > 512 * 1024) throw new Error('消息为空或过长');
       if (!['plan', 'edit'].includes(options.mode)) throw new Error('权限模式无效');
+      const selected = await this.checkInferenceOptions(options);
       return this.taskRequest(options.projectPath, 'start', { jobId: options.jobId, conversationId: options.conversationId,
-        prompt: options.prompt, sessionId: options.sessionId, mode: options.mode,
+        prompt: options.prompt, sessionId: options.sessionId, mode: options.mode, ...selected,
         executable: this.claudePath, title: options.prompt.slice(0, 80) });
     },
   });

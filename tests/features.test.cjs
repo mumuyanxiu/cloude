@@ -77,6 +77,37 @@ test('approval scope crosses the task transport without renderer-supplied permis
   assert.equal(calls[1][2].updatedPermissions, undefined);
 });
 
+test('effort capability checks preserve defaults and reject unsupported CLI options before launch', async () => {
+  const remote = new RemoteClient();
+  let calls = 0;
+  remote._execCapture = async () => { calls++; return { code: 0, stdout: '  --effort <level> Effort level (low, medium, high, max)\n  --model <model> Model name\n' }; };
+  assert.deepEqual(await remote.checkInferenceOptions({}), {});
+  assert.deepEqual(await remote.checkInferenceOptions({ model: 'sonnet' }), { model: 'sonnet' });
+  assert.equal(calls, 0, 'following remote settings must not probe or override effort');
+  assert.deepEqual(await remote.checkInferenceOptions({ effort: 'high' }), { effort: 'high' });
+  await assert.rejects(remote.checkInferenceOptions({ effort: 'xhigh' }), /不支持或未列出 xhigh/);
+  remote._execCapture = async () => ({ code: 0, stdout: '  --model <model> low medium high max\n' });
+  await assert.rejects(remote.checkInferenceOptions({ effort: 'high' }), /不支持/);
+  remote._execCapture = async () => ({ code: 0, stdout: '  --effort <level>\n      Supported: low, medium, high, xhigh, max\n  --model <model>\n' });
+  assert.equal((await remote.checkInferenceOptions({ effort: 'xhigh' })).effort, 'xhigh');
+});
+
+test('both task paths carry selected model and effort; persistent launch rejects unsupported effort', async () => {
+  const remote = new RemoteClient(); remote._directory = async value => value;
+  remote._execCapture = async () => ({ code: 0, stdout: '  --effort <level> low medium high max\n  --model <model>\n' });
+  let task, job;
+  remote.taskRequest = async (_project, _operation, options) => { task = options; return { jobId: options.jobId }; };
+  remote._startJob = async options => { job = options; return { jobId: options.jobId }; };
+  const options = { projectPath: '/project', jobId: 'fixture', conversationId: 'conversation', prompt: 'Fixture', mode: 'edit', sessionId: 'previous', model: 'opus', effort: 'high' };
+  await remote.startPersistentChat(options);
+  assert.equal(task.model, 'opus'); assert.equal(task.effort, 'high'); assert.equal(task.sessionId, 'previous');
+  await remote.startChat(options);
+  assert.match(job.command, /'--model' 'opus'/); assert.match(job.command, /'--effort' 'high'/);
+  task = undefined;
+  await assert.rejects(remote.startPersistentChat({ ...options, effort: 'xhigh' }), /不支持/);
+  assert.equal(task, undefined);
+});
+
 test('task polling can transport a complete saved event larger than 4 MB', async () => {
   const remote = new RemoteClient(); remote._directory = async value => value;
   const result = { task: { state: 'completed' }, events: [{ type: 'event', event: { text: 'X'.repeat(5 * 1024 * 1024) } }], cursor: 1, more: false };

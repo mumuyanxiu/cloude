@@ -60,6 +60,7 @@ async function run() {
   const shellMenu = '[role="listbox"][aria-label="终端常用命令"]';
   const exists = selector => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`);
   const value = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).value`);
+  const select = (label, value) => evaluate(`(() => { const e=document.querySelector(${JSON.stringify(`select[aria-label="${label}"]`)}); e.value=${JSON.stringify(value)}; e.dispatchEvent(new Event('change',{bubbles:true})); })()`);
   const focus = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
   const key = async (keyCode, modifiers = []) => {
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
@@ -102,7 +103,44 @@ async function run() {
       await until(() => calls.chat.length === 1, 'default chat');
       assert.equal(calls.chat[0].allowCommands, undefined);
       assert.equal(calls.chat[0].mode, 'edit');
+      assert.equal(calls.chat[0].model, undefined);
+      assert.equal(calls.chat[0].effort, undefined);
       assert.equal(calls.chat[0].prompt, '检查模拟项目。');
+      await completeChat();
+    });
+
+    await check('model and effort persist, reach resumed chats and lock while running', async () => {
+      await select('Claude 模型', 'opus'); await select('Claude 思考强度', 'high');
+      await until(async () => (await main.store.load()).settings?.effort === 'high', 'inference preferences saved');
+      await main.store.queue;
+      await window.loadFile(path.resolve(__dirname, '..', 'dist', 'index.html'));
+      await until(() => evaluate('document.querySelector(".connection-button")?.textContent === "已连接"'), 'inference reload');
+      assert.equal(await value('[aria-label="Claude 模型"]'), 'opus');
+      assert.equal(await value('[aria-label="Claude 思考强度"]'), 'high');
+      const before = calls.chat.length;
+      await type(chatInput, '使用选择的模型继续。'); await key('Return', ['control']);
+      await until(() => calls.chat.length === before + 1, 'selected inference sent');
+      assert.equal(calls.chat.at(-1).model, 'opus'); assert.equal(calls.chat.at(-1).effort, 'high');
+      assert.ok(calls.chat.at(-1).sessionId, 'model switch must preserve the existing session');
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Claude 模型"]').disabled`), true);
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Claude 思考强度"]').disabled`), true);
+      await completeChat();
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Claude 模型"]').disabled`), false);
+      await select('Claude 模型', 'custom');
+      await type(chatInput, '自定义模型测试'); await key('Return', ['control']);
+      await until(() => exists('.toast.error'), 'blank custom model error');
+      assert.equal(calls.chat.length, before + 1);
+      assert.equal(await value(chatInput), '自定义模型测试');
+      await click('[aria-label="关闭提示"]');
+      await type('[aria-label="自定义模型 ID"]', 'gateway/custom-model');
+      await type(chatInput, '自定义模型测试'); await key('Return', ['control']);
+      await until(() => calls.chat.length === before + 2, 'custom model sent');
+      assert.equal(calls.chat.at(-1).model, 'gateway/custom-model');
+      await completeChat();
+      await select('Claude 模型', ''); await select('Claude 思考强度', '');
+      await type(chatInput, '恢复远端默认'); await key('Return', ['control']);
+      await until(() => calls.chat.length === before + 3, 'inherited inference sent');
+      assert.equal(calls.chat.at(-1).model, undefined); assert.equal(calls.chat.at(-1).effort, undefined);
       await completeChat();
     });
 
@@ -242,6 +280,15 @@ async function run() {
       assert.ok(rectangle.visibleAtHeading, 'terminal suggestions are clipped or covered');
       await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await pause(120);
       await fs.writeFile(path.join(outputDirectory, 'commands-minimum-fixture.png'), (await window.webContents.capturePage()).toPNG());
+    });
+    await check('custom model and effort controls fit the minimum window', async () => {
+      await key('Escape'); await type(chatInput, '检查模型设置');
+      await select('Claude 模型', 'custom'); await select('Claude 思考强度', 'max');
+      await pause(100);
+      const controls = await evaluate(`Array.from(document.querySelectorAll('.model-controls select, .model-controls input')).map(e => { const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,visible:e===document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)}; })`);
+      for (const r of controls) assert.ok(r.left >= 0 && r.top >= 0 && r.right <= r.width && r.bottom <= r.height && r.visible, JSON.stringify(r));
+      await window.webContents.capturePage(); await pause(150);
+      await fs.writeFile(path.join(outputDirectory, 'models-minimum-fixture.png'), (await window.webContents.capturePage()).toPNG());
     });
     await main.store.queue;
     const report = { passed: checks.length, checks, minimumLayout, realSSH: false, realClaude: false, actualElectronIPC: true, actualChromiumKeyboard: true, imeEvents: 'DOM composition events; no physical IME used', testDataDirectory: temporaryRoot };

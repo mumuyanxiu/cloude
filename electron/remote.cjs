@@ -76,9 +76,20 @@ class JsonLines {
   end() { this.consume(this.decoder.end()); this.line(this.pending.trim()); this.pending = ''; }
 }
 
-function claudeCommand({ executable, projectPath, sessionId, mode, model }) {
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+function inferenceOptions({ model, effort }) {
+  if (model !== undefined && model !== '') {
+    assertString(model, '模型', 120);
+    if (/[\x00-\x20\x7f]/.test(model)) throw new Error('模型 ID 不能包含空白或控制字符。');
+  }
+  if (effort !== undefined && effort !== '' && !EFFORT_LEVELS.includes(effort)) throw new Error('未知的思考强度。');
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+}
+
+function claudeCommand({ executable, projectPath, sessionId, mode, model, effort }) {
   if (!['plan', 'edit'].includes(mode)) throw new Error('未知的 Claude 权限模式。');
   assertString(executable, 'Claude 可执行文件', 4096);
+  inferenceOptions({ model, effort });
   const args = [executable, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
   // Omit overrides so the CLI loads the same permission settings as the TUI.
   if (mode === 'plan') args.push('--permission-mode', 'plan');
@@ -87,7 +98,10 @@ function claudeCommand({ executable, projectPath, sessionId, mode, model }) {
     args.push('--resume', sessionId);
   }
   if (model) args.push('--model', assertString(model, '模型', 120));
-  return `export PATH="$HOME/.local/bin:$PATH"; export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1; cd -- ${shellQuote(projectPath)} && exec ${args.map(shellQuote).join(' ')}`;
+  if (effort) args.push('--effort', effort);
+  // Claude's effort environment variable outranks --effort; an explicit UI
+  // selection overrides it for this child only. Inherit both when unset.
+  return `export PATH="$HOME/.local/bin:$PATH"; export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1; ${effort ? `export CLAUDE_CODE_EFFORT_LEVEL=${shellQuote(effort)}; ` : ''}cd -- ${shellQuote(projectPath)} && exec ${args.map(shellQuote).join(' ')}`;
 }
 
 function usageCommand(executable, directory) {
@@ -651,6 +665,7 @@ class RemoteClient {
   async startChat(options) {
     assertString(options.prompt, '消息');
     assertString(options.conversationId, '聊天 ID', 128);
+    await this.checkInferenceOptions(options);
     const directory = await this._directory(options.projectPath);
     const command = claudeCommand({ ...options, executable: this.claudePath, projectPath: directory });
     return this._startJob({ ...options, kind: 'chat', command, input: options.prompt, pty: false });
@@ -687,7 +702,7 @@ class RemoteClient {
 }
 
 // Every public asynchronous operation stays bound to the connection it began on.
-require('./remote-features.cjs').installRemoteFeatures(RemoteClient, shellQuote);
+require('./remote-features.cjs').installRemoteFeatures(RemoteClient, shellQuote, inferenceOptions);
 // This also protects library callers independently of the desktop's busy-operation UI.
 for (const method of ['readMedia', 'searchFiles', 'openTerminal', 'forwardPort', 'taskRequest', 'listTasks', 'pollTask', 'replyTask', 'stopTask', 'startPersistentChat', 'openProject', 'listSessions', 'readSession', 'resolvePath', 'listFiles', 'readFile', 'saveFile', 'mkdir', 'inspectUploadPath', 'mkdirUploadDirectory', 'download', 'upload', 'getDiff', 'getUsage', 'startChat', 'runCommand']) {
   const implementation = RemoteClient.prototype[method];
@@ -697,4 +712,4 @@ for (const method of ['readMedia', 'searchFiles', 'openTerminal', 'forwardPort',
   };
 }
 
-module.exports = { RemoteClient, shellQuote, isWithin, expandPath, JsonLines, claudeCommand, usageCommand, MAX_TEXT_BYTES };
+module.exports = { RemoteClient, shellQuote, isWithin, expandPath, JsonLines, claudeCommand, usageCommand, inferenceOptions, MAX_TEXT_BYTES };

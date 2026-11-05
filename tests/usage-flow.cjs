@@ -82,6 +82,35 @@ async function run() {
       await evaluate('document.getElementById("fixture-banner").remove()');
     });
 
+    await check('usage timestamps stay in UTC+8 across system timezones and date boundaries', async () => {
+      const shiftedUsage = usage(32, 68);
+      shiftedUsage.fetchedAt = Date.parse('2026-11-05T03:30:00.000Z');
+      shiftedUsage.limits[0].resetsAt = '2099-11-02T23:45:00.000Z';
+      shiftedUsage.limits[1].resetsAt = '2099-11-04T20:20:00-04:00';
+      nextUsage = async () => shiftedUsage;
+      window.webContents.debugger.attach('1.3');
+      try {
+        for (const timezoneId of ['UTC', 'America/Los_Angeles']) {
+          await window.webContents.debugger.sendCommand('Emulation.setTimezoneOverride', { timezoneId });
+          assert.equal(await evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone'), timezoneId);
+          await waitIdle(); await refresh(); await waitIdle();
+          const labels = await evaluate('[...document.querySelectorAll(".usage-reset")].map(e=>({text:e.textContent,title:e.title}))');
+          assert.match(labels[0].text, /11[\/月-]0?3(?:日)? .*07:45.*UTC\+8/);
+          assert.match(labels[1].text, /11[\/月-]0?5(?:日)? .*08:20.*UTC\+8/);
+          assert.match(labels[0].title, /07:45.*UTC\+8/);
+          assert.match(labels[1].title, /08:20.*UTC\+8/);
+          const footer = await evaluate('({text:document.querySelector(".usage-footer").textContent,title:document.querySelector(".usage-footer span").title})');
+          assert.match(footer.text, /更新于 11:30.*UTC\+8/);
+          assert.match(footer.title, /11:30.*UTC\+8/);
+        }
+      } finally {
+        await window.webContents.debugger.sendCommand('Emulation.setTimezoneOverride', { timezoneId: '' });
+        window.webContents.debugger.detach();
+        nextUsage = async () => usage(32, 68);
+        await refresh(); await waitIdle();
+      }
+    });
+
     await check('account card can be collapsed and expanded manually', async () => {
       await click('[aria-label="收起账户额度"]');
       await until(() => evaluate(`!!document.querySelector('[aria-label="展开账户额度"]')`), 'collapsed account card');

@@ -59,6 +59,22 @@ test('JSON streaming survives byte-split Chinese text and ignores startup diagno
   assert.deepEqual(notes, ['startup notice\n']);
 });
 
+test('model and effort overrides reach Claude without changing inherited defaults', () => {
+  const options = { executable: 'claude', projectPath: '/work', mode: 'edit' };
+  assert.doesNotMatch(claudeCommand(options), /--model|--effort|CLAUDE_CODE_EFFORT_LEVEL/);
+  const command = claudeCommand({ ...options, model: "gateway/model's;$(literal)", effort: 'high' });
+  assert.ok(command.includes("'--model' " + shellQuote("gateway/model's;$(literal)")));
+  assert.match(command, /'--effort' 'high'/);
+  assert.match(command, /export CLAUDE_CODE_EFFORT_LEVEL='high'/);
+  assert.doesNotMatch(command, /--permission-mode|--allowedTools/);
+  for (const model of [null, 42, 'bad model', 'bad\nmodel', 'x'.repeat(121)]) {
+    assert.throws(() => claudeCommand({ ...options, model }));
+  }
+  for (const effort of [null, 'invalid', 'high;echo']) {
+    assert.throws(() => claudeCommand({ ...options, effort }));
+  }
+});
+
 test('workspace checks reject traversal, sibling-prefix and symlink escapes', async t => {
   const { remote, file, sftp } = await fixture(t);
   await fsp.writeFile(file('/secrets/token'), 'secret');

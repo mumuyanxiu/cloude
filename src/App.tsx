@@ -12,6 +12,8 @@ import { CommandSuggestions, isComposingInput, useCommandSuggestions } from './C
 import type { AppState, ConnectionConfig, ConnectionInfo, Conversation, FileEntry, Message, Project, RemoteEvent, UploadProgressData } from './types';
 import { useProjectHistory } from './useProjectHistory';
 import { useChatScroll } from './useChatScroll';
+import { ModelControls, modelChoices, effortChoices } from './ModelControls';
+import type { ClaudeEffort } from './types';
 import { UploadProgress } from './UploadProgress';
 import { UpdateControl } from './UpdateControl';
 import './sessions.css';
@@ -71,6 +73,7 @@ export default function App() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const attachmentBusyRef = useRef(false);
+  const attachmentUploadingRef = useRef(false);
   const [dropActive, setDropActive] = useState(false);
   const [imagePath, setImagePath] = useState('');
   const [filePicker, setFilePicker] = useState(false);
@@ -88,6 +91,9 @@ export default function App() {
   const [references, setReferences] = useState<string[]>([]);
   const folderReferencePaths = useRef(new Set<string>());
   const [mode, setMode] = useState<'plan' | 'edit'>('edit');
+  const [model, setModel] = useState('');
+  const [customModel, setCustomModel] = useState('');
+  const [effort, setEffort] = useState<ClaudeEffort>('');
   const [permissionModal, setPermissionModal] = useState(false);
   const [commandHelpModal, setCommandHelpModal] = useState(false);
   const [chatRun, setChatRun] = useState<{ id: string; conversationId: string; messageId: string } | null>(null);
@@ -142,14 +148,17 @@ export default function App() {
       setPanelWidth(Math.max(330, Math.min(700, next.settings?.panelWidth || 420)));
       setDurableTasks(next.settings?.durableTasks ?? true);
       setNotifications(next.settings?.notifications ?? true);
+      setModel(modelChoices.includes(next.settings?.model || '') ? next.settings?.model || '' : '');
+      setCustomModel(typeof next.settings?.customModel === 'string' ? next.settings.customModel : '');
+      setEffort(effortChoices.includes(next.settings?.effort || '') ? next.settings?.effort || '' : '');
       setLoaded(true);
     }).catch(error => { if (!canceled) notify(`无法读取本地记录，已暂停自动保存以保留原文件：${errorText(error)}`, true); });
     return () => { canceled = true; };
   }, [notify]);
   useEffect(() => {
     if (!loaded) return;
-    void api.saveState({ ...state, connection: stripSecrets(state.connection), settings: { ...state.settings, activeProjectId, activeConversationId, panelWidth, durableTasks, notifications } }).catch(error => notify(`会话保存失败：${errorText(error)}`, true));
-  }, [state, loaded, activeProjectId, activeConversationId, panelWidth, durableTasks, notifications, notify]);
+    void api.saveState({ ...state, connection: stripSecrets(state.connection), settings: { ...state.settings, activeProjectId, activeConversationId, panelWidth, durableTasks, notifications, model, customModel, effort } }).catch(error => notify(`会话保存失败：${errorText(error)}`, true));
+  }, [state, loaded, activeProjectId, activeConversationId, panelWidth, durableTasks, notifications, model, customModel, effort, notify]);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', handler); return () => window.removeEventListener('beforeunload', handler);
@@ -166,6 +175,8 @@ export default function App() {
     if (event.kind === 'connection') {
       if (event.status === 'error') { setTaskStatus('连接异常'); if (event.message) notify(event.message, true); return; }
       uploadContextRef.current.connection = null;
+      attachmentUploadingRef.current = false;
+      setTransfer(null);
       setConnection(null); setTaskStatus('连接中断'); setPersistentReady(''); setActiveTask(null); setTaskPollError('');
       if (runRef.current) {
         const run = runRef.current;
@@ -177,6 +188,9 @@ export default function App() {
       return;
     }
     if (event.kind === 'transfer') {
+      // Ignore delayed upload events after the owning operation has ended.
+      if (event.direction === 'upload' && (!uploadContextRef.current.connection ||
+          !uploadBusyRef.current && !attachmentUploadingRef.current)) return;
       if (event.type === 'upload-progress') {
         if (uploadBusyRef.current) setUploadProgress(current => {
           const now = Date.now();
@@ -484,16 +498,23 @@ export default function App() {
     if (!project) { openProjectModal(); return; }
     if (conversation?.historyLoaded === false) { notify('请等历史对话加载完成后再继续；加载失败时可点击重试。', true); return; }
     if (!connection.claudeAvailable) { notify('未找到 Claude Code，请在连接设置中检查命令路径', true); return; }
+    const selectedModel = model === 'custom' ? customModel.trim() : model;
+    if (model === 'custom' && (!selectedModel || /[\s\x00-\x1f\x7f]/.test(selectedModel))) { notify('请输入有效的自定义模型 ID，不能包含空白或控制字符。', true); return; }
     let uploaded: Attachment[] = [];
     const origin = uploadContextRef.current;
     if (attachments.length) {
       attachmentBusyRef.current = true; setAttachmentBusy(true);
+      attachmentUploadingRef.current = true;
       try {
         uploaded = await api.uploadAttachments({ ids: attachments.map(a => a.id), projectPath: project.path });
         const current = uploadContextRef.current;
         if (origin.projectId !== current.projectId || origin.conversationId !== current.conversationId || origin.generation !== current.generation) throw new Error('当前会话已变化，附件已上传，请在原项目中重新引用');
       } catch (e) { notify(`附件未发送：${errorText(e)}`, true); return; }
-      finally { attachmentBusyRef.current = false; setAttachmentBusy(false); }
+      finally {
+        attachmentUploadingRef.current = false;
+        attachmentBusyRef.current = false; setAttachmentBusy(false);
+        setTransfer(current => current?.direction === 'upload' ? null : current);
+      }
     }
     let target = conversation;
     if (!target || target.projectId !== project.id) target = { id: id(), projectId: project.id, title: '新对话', messages: [], updatedAt: Date.now() };
@@ -509,7 +530,7 @@ export default function App() {
     const run: ChatRun = { id: id(), conversationId: target.id, messageId: assistantMessage.id, confirmed: '', pending: '', seen: new Set(), hasResult: false, persistent: durableTasks, projectPath: project.path };
     runRef.current = run; setChatRun(run); setTaskStatus('正在连接 Claude');
     try {
-      const options = { jobId: run.id, conversationId: target.id, projectPath: project.path, prompt: fullPrompt, sessionId: target.sessionId, mode };
+      const options = { jobId: run.id, conversationId: target.id, projectPath: project.path, prompt: fullPrompt, sessionId: target.sessionId, mode, ...(selectedModel ? { model: selectedModel } : {}), ...(effort ? { effort } : {}) };
       if (durableTasks) {
         setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, messages: c.messages.map(m => m.id === run.messageId ? { ...m, jobId: run.id } : m), task: { jobId: run.id, messageId: run.messageId, cursor: 0 } } : c) }));
         await api.startPersistentChat(options); setPersistentReady(run.id);
@@ -564,6 +585,7 @@ export default function App() {
           {conversation && (conversation.messages.length > 0 || conversation.sessionId) ? <div className="chat-scroll" ref={chatScroll.viewportRef} onScroll={chatScroll.onScroll}><div className="conversation-heading"><span>{conversation.title}</span><span>{conversation.sessionId ? '上下文已关联' : '新会话'}</span></div>{conversation.historyNotice && <p className="history-notice">{conversation.historyNotice}</p>}{conversation.historyLoaded === false ? <div className="history-notice history-load-status" role={projectHistory.readError ? 'alert' : 'status'}>{projectHistory.readError ? <><span>历史对话加载失败：{projectHistory.readError}</span><button className="text-button" onClick={projectHistory.refresh}>重试</button></> : connected ? <><Spinner />正在加载历史对话…</> : '连接设备后可读取这份历史对话。'}</div> : !conversation.messages.length && <p className="history-notice">这份会话暂时没有可显示的文字消息，可以直接发送消息继续。</p>}<div className="messages" ref={chatScroll.contentRef}>{conversation.messages.map(message => <MessageView key={message.id} message={message} streaming={chatRun?.messageId === message.id} onDownload={download} onOpen={openRemoteFile} projectPath={project?.path} connected={connected} />)}</div></div> : <div className="welcome"><div className="welcome-inner"><Star size={58} /><p className="welcome-eyebrow">你的远程开发空间</p><h1>今天，<br />一起完成什么？</h1><div className="suggestions"><button onClick={() => { setPrompt('请先阅读这个项目，介绍代码结构和主要入口。'); composerRef.current?.focus(); }}><Code2 size={17} /><span>了解这个项目</span><ArrowUp size={14} /></button><button onClick={() => { setPrompt('帮我检查项目中的问题，并给出修改建议。'); composerRef.current?.focus(); }}><GitCompareArrows size={17} /><span>检查与改进代码</span><ArrowUp size={14} /></button></div>{!connected && <button className="welcome-connect" onClick={openConnection}><span className="status-dot" />连接设备，开始工作<ChevronRight size={14} /></button>}</div></div>}
           {chatScroll.showLatest && <button className="chat-latest" onClick={chatScroll.scrollToLatest}><ChevronDown size={14} />回到最新</button>}
           {taskPollError && <p className="task-poll-error">{taskPollError}</p>}{activeTask && connected && chatRun?.conversationId === activeConversationId && activeTask.pendingRequests.map(request => <RequestCard key={request.request_id} request={request} task={activeTask} onDone={() => setActiveTask(old => old ? { ...old, pendingRequests: old.pendingRequests.filter(r => r.request_id !== request.request_id) } : old)} />)}<div className="composer-area"><CommandSuggestions controller={chatCompletion} label="Claude 常用命令" className="chat-command-menu" /><div className={`composer ${dropActive ? "drop-active" : ""}`} onDragOver={e => { e.preventDefault(); setDropActive(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropActive(false); }} onDrop={e => { e.preventDefault(); setDropActive(false); const items = Array.from(e.dataTransfer.files); if (items.length) void addAttachments(() => api.stageDropped(items)); }}>
+            <ModelControls model={model} customModel={customModel} effort={effort} disabled={!!chatRun || attachmentBusy || !!uploadBusy} onModel={setModel} onCustomModel={setCustomModel} onEffort={setEffort} />
             {attachments.length > 0 && <div className="attachment-strip">{attachments.map(item => <div className="attachment-chip" key={item.id}>{item.preview ? <img src={item.preview} alt={item.name} /> : <FileIcon name={item.name} directory={item.kind === "folder"} />}<span title={item.name}>{item.name}</span><button aria-label={`移除附件 ${item.name}`} disabled={attachmentBusy} onClick={() => removeAttachment(item)}><X size={13} /></button></div>)}</div>}{attachmentBusy && <div className="paste-status"><Spinner /> 正在准备附件…</div>}{references.length > 0 && <div className="references">{references.map(path => <span key={path} title={path}><FileIcon name={path} directory={folderReferencePaths.current.has(path)} />{baseName(path)}<button aria-label={`移除引用 ${baseName(path)}`} onClick={() => setReferences(r => r.filter(p => p !== path))}><X size={12} /></button></span>)}</div>}
             <textarea ref={composerRef} value={prompt} onPaste={e => { const files = Array.from(e.clipboardData.files); if (files.length) { e.preventDefault(); void addAttachments(() => api.stageDropped(files)); } else if (e.clipboardData.types.includes("Files")) { e.preventDefault(); void addAttachments(() => api.stageClipboard()); } }} onChange={e => { const value = e.target.value; if (/(?:^|\s)@$/.test(value) && connected && project) { setPrompt(value.slice(0, -1)); setFilePicker(true); } else setPrompt(value); }} placeholder={project ? `向 Claude 描述任务，或引用项目文件…` : '从一个想法、一段代码或一个问题开始…'} aria-label="发送给 Claude 的消息" aria-autocomplete="list" aria-controls={chatCompletion.visible ? chatCompletion.listId : undefined} aria-expanded={chatCompletion.visible} aria-activedescendant={chatCompletion.activeDescendant} onBlur={chatCompletion.close} rows={3} onKeyDown={e => { if (isComposingInput(e)) return; if (chatCompletion.handleKeyDown(e)) return; if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); void send(); } }} />
             <div className="composer-toolbar"><div className="composer-tools"><IconButton label="常用 Claude 命令" onClick={chatCompletion.toggle}><span aria-hidden="true">/</span></IconButton><IconButton label="上传文件并引用" disabled={!connected || !project || !!uploadBusy} onClick={() => void upload(true)}>{uploadBusy === 'files' ? <Spinner /> : <Paperclip size={17} />}</IconButton><IconButton label="上传文件夹并引用" disabled={!connected || !project || !!uploadBusy} onClick={() => void upload(true, 'folder')}>{uploadBusy === 'folder' ? <Spinner /> : <FolderUp size={17} />}</IconButton><IconButton label="粘贴图片或文件" disabled={attachmentBusy} onClick={() => void addAttachments(() => api.stageClipboard())}><ClipboardPaste size={16} /></IconButton><IconButton label="搜索并引用项目文件" disabled={!connected || !project} onClick={() => setFilePicker(true)}><Search size={16} /></IconButton><IconButton label="引用当前打开的文件" disabled={!openFile} onClick={() => openFile && setReferences(r => [...new Set([...r, openFile.path])])}><AtSign size={17} /></IconButton><span className="composer-divider" /><select value={mode} aria-label="Claude 工作模式" onChange={e => setMode(e.target.value as 'plan' | 'edit')}><option value="edit">跟随远端</option><option value="plan">只读分析</option></select><button className="permission-button" onClick={() => setPermissionModal(true)} title="Claude 权限设置"><ShieldCheck size={14} /><span>{mode === 'plan' ? '只读分析' : '继承远端权限'}</span></button></div>{chatRun ? <button className="send-button stop-button" aria-label="停止 Claude 任务" onClick={() => void stop(chatRun.id)}><Square size={16} fill="currentColor" /></button> : <button className="send-button" aria-label="发送消息" disabled={(!prompt.trim() && !attachments.length && !references.length) || attachmentBusy || !!uploadBusy || conversation?.historyLoaded === false} onClick={() => void send()}><ArrowUp size={21} /></button>}</div>

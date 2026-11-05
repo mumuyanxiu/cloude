@@ -152,6 +152,16 @@ def claude_args(config):
         args += ['--permission-mode', 'plan']
     if config.get('sessionId'):
         args += ['--resume', valid_id(config['sessionId'])]
+    model = config.get('model')
+    if model:
+        if not isinstance(model, str) or len(model.encode('utf-8')) > 120 or re.search(r'[\x00-\x20\x7f]', model):
+            raise ValueError('模型 ID 无效')
+        args += ['--model', model]
+    effort = config.get('effort')
+    if effort:
+        if effort not in ('low', 'medium', 'high', 'xhigh', 'max'):
+            raise ValueError('思考强度无效')
+        args += ['--effort', effort]
     return args
 
 
@@ -215,6 +225,8 @@ def worker(folder):
         env = dict(os.environ)
         env['PATH'] = str(Path.home() / '.local/bin') + ':' + env.get('PATH', '')
         env['CLAUDE_CODE_DISABLE_BACKGROUND_TASKS'] = '1'
+        if config.get('effort'):
+            env['CLAUDE_CODE_EFFORT_LEVEL'] = config['effort']
         child = subprocess.Popen(args, cwd=config['projectPath'], env=env, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         events = queue.Queue(maxsize=256)
@@ -346,7 +358,7 @@ def dispatch(data):
         status = {'jobId': job_id, 'conversationId': data.get('conversationId', ''), 'projectPath': project,
                   'title': data.get('title', '')[:80], 'state': 'starting', 'createdAt': now, 'updatedAt': now,
                   'sessionId': data.get('sessionId'), 'pendingRequests': []}
-        config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode']}
+        config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode', 'model', 'effort']}
         config['projectPath'] = project
         atomic_json(folder / 'config.json', config)
         atomic_json(folder / 'status.json', status)

@@ -71,6 +71,7 @@ async function run() {
       assert.ok(calls.chat[0].prompt.includes(attachment.path));
       assert.equal(attachment.preview, undefined);
       await until(() => exists('.user-message .remote-image img'), 'sent image preview');
+      assert.equal(await evaluate('document.querySelector(".statusbar").textContent.includes("上传")'), false, 'completed image upload must clear the footer');
     });
     await check('image preview supports native clipboard copy and local application opening', async () => {
       await click('.user-message .remote-image button');
@@ -88,6 +89,35 @@ async function run() {
       await until(() => exists('.attachment-chip img'), 'paste event attachment');
       await click('.attachment-chip button');
       assert.equal(await evaluate(`(() => { const data=new DataTransfer();data.setData('text/plain','hello');const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});document.querySelector('.composer textarea').dispatchEvent(event);return event.defaultPrevented;})()`), false);
+    });
+    await check('failed attachment uploads clear progress, retain the attachment and ignore late events', async () => {
+      await until(() => exists('[aria-label="发送消息"]'), 'idle chat before failure');
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
+      await click('[aria-label="粘贴图片或文件"]');
+      await until(() => exists('.attachment-chip img'), 'attachment staged before failure');
+      const uploadFile = main.remote.upload;
+      const chatCount = calls.chat.length;
+      let rejectUpload;
+      main.remote.upload = async () => {
+        main.remote._emit({ kind: 'transfer', direction: 'upload', name: 'failed-attachment.png', transferred: 1, total: 2 });
+        return new Promise((_resolve, reject) => { rejectUpload = reject; });
+      };
+      try {
+        await click('[aria-label="发送消息"]');
+        await until(() => evaluate('document.querySelector(".statusbar").textContent.includes("failed-attachment.png · 50%")'), 'active upload remains visible');
+        rejectUpload(new Error('fixture attachment upload failure'));
+        await until(() => evaluate('document.querySelector(".toast.error")?.textContent.includes("附件未发送")'), 'attachment failure shown');
+        assert.equal(calls.chat.length, chatCount, 'failed upload must not send a chat');
+        assert.ok(await exists('.attachment-chip img'), 'failed attachment remains available to retry');
+        assert.equal(await evaluate('document.querySelector(".statusbar").textContent.includes("上传")'), false);
+        main.remote._emit({ kind: 'transfer', direction: 'upload', name: 'late-attachment.png', transferred: 2, total: 2 });
+        await pause(80);
+        assert.equal(await evaluate('document.querySelector(".statusbar").textContent.includes("late-attachment.png")'), false);
+      } finally {
+        main.remote.upload = uploadFile;
+      }
+      await click('.attachment-chip button');
+      await click('[aria-label="关闭提示"]');
     });
     await check('file references search and directory bundle use the real SFTP-backed implementation', async () => {
       await click('[aria-label="搜索并引用项目文件"]');
@@ -125,6 +155,7 @@ async function run() {
       let task; let starts = 0; let polls = 0; const events = [];
       main.remote.startPersistentChat = async options => {
         starts++;
+        assert.equal(options.model, 'sonnet'); assert.equal(options.effort, 'medium');
         task = { jobId: options.jobId, conversationId: options.conversationId, projectPath, title: 'Fixture question', state: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), pendingRequests: [{ type: 'control_request', request_id: 'question', request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions: [{ question: 'Choose a format', options: [{ label: 'PNG' }, { label: 'JPEG' }] }] } } }] };
         events.push({ type: 'event', event: { type: 'system', subtype: 'init', session_id: 'durable-session' } });
         return { jobId: options.jobId };
@@ -133,6 +164,7 @@ async function run() {
       main.remote.pollTask = async options => { polls++; return { task, events: events.slice(options.cursor), cursor: events.length, more: false }; };
       main.remote.replyTask = async options => { calls.replies.push(options); task = { ...task, state: 'completed', pendingRequests: [], sessionId: 'durable-session' }; events.push({ type: 'event', event: { type: 'assistant', message: { content: [{ type: 'text', text: 'Answered once.' }] } } }, { type: 'event', event: { type: 'result', subtype: 'success', session_id: 'durable-session' } }); };
       await click('.composer-feature-options input');
+      await evaluate(`(() => { for (const [label,value] of [['Claude 模型','sonnet'],['Claude 思考强度','medium']]) { const e=document.querySelector('select[aria-label="'+label+'"]');e.value=value;e.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
       await fill('.composer textarea', 'Ask a fixture question'); await click('[aria-label="发送消息"]');
       await until(() => exists('.request-card'), 'question card');
       assert.equal(await evaluate('document.querySelector(".request-actions").textContent.includes("本项目始终允许")'), false);
@@ -170,6 +202,7 @@ async function run() {
       await until(async () => !(await exists('.request-card')) && await exists('[aria-label="发送消息"]'), 'completed UI');
       await pause(150);
       await fs.writeFile(path.resolve('output/features-fixture.png'), (await window.webContents.capturePage()).toPNG());
+      await evaluate(`(() => { for (const label of ['Claude 模型','Claude 思考强度']) { const e=document.querySelector('select[aria-label="'+label+'"]');e.value='';e.dispatchEvent(new Event('change',{bubbles:true})); } })()`);
     });
     await check('tool approvals preserve once, deny and project scopes; failed submission can be retried', async () => {
       const requests = [
