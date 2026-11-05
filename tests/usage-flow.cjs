@@ -48,6 +48,7 @@ async function run() {
   main.remote.connect = async value => { calls.connect.push(value); return { home: '/home/fixture', workspace, hostname: value.host, claudeAvailable: true, claudeVersion: 'fixture-only' }; };
   main.remote.disconnect = async () => {};
   main.remote.listFiles = async () => [];
+  main.remote.listSessions = async () => ({ sessions: [] });
   main.remote.getUsage = async () => { calls.usage++; return nextUsage(); };
   const window = await main.ready;
   window.webContents.setBackgroundThrottling(false);

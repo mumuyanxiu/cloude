@@ -31,6 +31,11 @@ if prompt == 'permission':
 if prompt == 'fail':
     print('fixture login missing', file=sys.stderr)
     sys.exit(7)
+if prompt == 'image':
+    data = 'A' * (2 * 1024 * 1024)
+    send({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'read-image','content':[{'type':'image','source':{'type':'base64','media_type':'image/png','data':data}}]}]},'tool_use_result':{'type':'image','file':{'base64':data}}})
+if prompt == 'long-text':
+    send({'type':'assistant','message':{'content':[{'type':'text','text':'large text: ' + 'X' * (5 * 1024 * 1024)}]}})
 time.sleep(0.25)
 send({'type':'assistant','message':{'content':[{'type':'text','text':'fixture complete'}]}})
 send({'type':'result','subtype':'success','session_id':'fixture-session','result':'fixture complete'})
@@ -118,6 +123,14 @@ class Tasks(unittest.TestCase):
         self.assertTrue(any('login missing' in e.get('data', '') for e in result['events']))
         with self.assertRaises(ValueError):
             self.request('poll', '../escape')
+
+    def test_reading_an_image_larger_than_one_mb_completes(self):
+        self.start('image')
+        result = self.wait_state('completed')
+        image = next(e['event'] for e in result['events'] if e.get('event', {}).get('type') == 'user')
+        self.assertLess(len(json.dumps(image)), 1000)
+        self.assertEqual(image['message']['content'][0]['tool_use_id'], 'read-image')
+        self.assertTrue(any(e.get('event', {}).get('type') == 'result' for e in result['events']))
 
 
 if __name__ == '__main__':

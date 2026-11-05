@@ -44,6 +44,7 @@ async function run() {
   main.remote.connect = async () => { calls.connect++; return { home: '/home/fixture', workspace, hostname: config.host, claudeAvailable: true, claudeVersion: 'fixture-only' }; };
   main.remote.disconnect = async () => {};
   main.remote.listFiles = async () => [{ name: 'main.py', path: `${project}/main.py`, type: 'file', size: 10, mtime: 100 }];
+  main.remote.listSessions = async () => ({ sessions: [] });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now(), message: '模拟设备未提供额度数据' });
   main.remote.startChat = async options => { calls.chat.push(options); return { jobId: options.jobId }; };
   main.remote.runCommand = async options => { calls.commands.push(options); return { jobId: options.jobId }; };
@@ -69,7 +70,9 @@ async function run() {
     await pause(50);
   };
   const type = async (selector, text) => {
-    await focus(selector); await key('A', ['control']);
+    await focus(selector);
+    // Input setup must not depend on native Ctrl+A state after simulated IME.
+    await evaluate(`(() => { const e=document.querySelector(${JSON.stringify(selector)}); e.setSelectionRange(0,e.value.length); })()`);
     await window.webContents.insertText(text); await pause(60);
   };
   const completeChat = async () => {

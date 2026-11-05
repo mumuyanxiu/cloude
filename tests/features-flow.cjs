@@ -31,6 +31,7 @@ async function run() {
   main.remote.clientFactory = () => { throw new Error('Real user SSH forbidden'); };
   main.remote.connect = async () => { main.remote.client = {}; main.remote.sftp = sftp; main.remote.home = '/home/tester'; main.remote.workspace = '/home/tester/work'; main.remote.workspaceInput = '/home/tester/work'; return { home: '/home/tester', workspace: '/home/tester/work', hostname: 'fixture', claudeAvailable: true }; };
   main.remote.disconnect = async () => { main.remote._emit({ kind: 'connection', status: 'disconnected' }); };
+  main.remote.listSessions = async () => ({ sessions: [] });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now() });
   const calls = { chat: [], terminal: [], resize: [], input: [], external: [], opened: [], replies: [], stops: [] };
   main.remote.startChat = async options => { calls.chat.push(options); setTimeout(() => { main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'event', event: { type: 'result', subtype: 'success', result: '已查看图片。', session_id: 'fixture-session' } }); main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'exit', code: 0 }); }, 50); return { jobId: options.jobId }; };
@@ -54,6 +55,7 @@ async function run() {
   try {
     await until(() => evaluate('document.querySelector(".connection-button").textContent === "已连接"'), 'connection');
     await check('native clipboard image becomes an attachment and image-only send uploads exact bytes', async () => {
+      clipboard.clear(); // Remove pre-existing Windows file-drop formats before the image fixture.
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
       const copied = (await clipboard.read()).find(item => item.types.includes('image/png'));
       clipboardPng = Buffer.from(await (await copied.getType('image/png')).arrayBuffer());

@@ -60,3 +60,14 @@ test('task prompts travel on stdin and helper code is fixed, even with shell cha
   assert.equal(JSON.parse(captured.options.input).prompt, 'literal $(touch forbidden) secret');
   assert.match(JSON.parse(captured.options.input).runnerSource, /Per-task Claude/);
 });
+
+test('task polling can transport a complete saved event larger than 4 MB', async () => {
+  const remote = new RemoteClient(); remote._directory = async value => value;
+  const result = { task: { state: 'completed' }, events: [{ type: 'event', event: { text: 'X'.repeat(5 * 1024 * 1024) } }], cursor: 1, more: false };
+  remote._execCapture = async (_command, options) => {
+    const stdout = JSON.stringify(result);
+    assert.ok(Buffer.byteLength(stdout) <= options.maxBytes);
+    return { code: 0, stdout };
+  };
+  assert.deepEqual(await remote.pollTask({ projectPath: '/project', jobId: 'fixture' }), result);
+});

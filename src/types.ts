@@ -7,7 +7,7 @@ export interface Project { id: string; name: string; path: string; connectionKey
 export interface ToolCall { id: string; name: string; input?: unknown; result?: string }
 export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; size: number; mime?: string; preview?: string; path?: string }
 export interface Message { id: string; role: 'user' | 'assistant'; content: string; tools?: ToolCall[]; files?: string[]; attachments?: Attachment[]; error?: boolean; jobId?: string }
-export interface Conversation { id: string; projectId: string; title: string; sessionId?: string; messages: Message[]; updatedAt: number; historyNotice?: string; task?: { jobId: string; messageId: string; cursor: number; finished?: boolean } }
+export interface Conversation { id: string; projectId: string; title: string; sessionId?: string; messages: Message[]; updatedAt: number; historyNotice?: string; historyLoaded?: boolean; task?: { jobId: string; messageId: string; cursor: number; finished?: boolean } }
 export interface PermissionRequest { type: string; request_id: string; request: { subtype: string; tool_name: string; input: Record<string, any>; decision_reason?: string } }
 export interface RemoteTask { jobId: string; conversationId: string; projectPath: string; title: string; state: 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'interrupted'; createdAt: number; updatedAt: number; sessionId?: string; pendingRequests: PermissionRequest[]; message?: string; exitCode?: number }
 export interface PortForward { id: string; remotePort: number; localPort: number; url: string }

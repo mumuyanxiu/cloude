@@ -51,6 +51,7 @@ async function run() {
     return { home: '/home/fixture', workspace, hostname: 'fixture-workspace', claudeAvailable: true, claudeVersion: 'fixture-only' };
   };
   main.remote.disconnect = async () => { calls.disconnect++; };
+  main.remote.listSessions = async () => ({ sessions: [] });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now(), message: '模拟设备未提供额度数据' });
   main.remote.listFiles = async remotePath => { calls.listFiles.push(remotePath); return []; };
   const window = await main.ready;

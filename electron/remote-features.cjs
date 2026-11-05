@@ -92,7 +92,8 @@ function installRemoteFeatures(RemoteClient, shellQuote) {
     async taskRequest(projectPath, action, data = {}) {
       const directory = await this._directory(projectPath);
       const helper = await fs.readFile(path.join(__dirname, 'task-runner.py'), 'utf8');
-      const result = await this._execCapture(`python3 -c ${shellQuote(helper)}`, { input: JSON.stringify({ ...data, ...(action === 'start' ? { runnerSource: helper } : {}), projectPath: directory, action }), maxBytes: 4 * 1024 * 1024, timeout: 30000 });
+      // A poll normally holds 1 MB, but may return one complete 16 MB event.
+      const result = await this._execCapture(`python3 -c ${shellQuote(helper)}`, { input: JSON.stringify({ ...data, ...(action === 'start' ? { runnerSource: helper } : {}), projectPath: directory, action }), maxBytes: 32 * 1024 * 1024, timeout: 30000 });
       let answer;
       try { answer = JSON.parse(result.stdout); } catch { throw new Error(`任务服务不可用，请确认远端有 Python 3：${result.stderr.slice(0, 500)}`); }
       if (result.code !== 0 || answer.error) throw new Error(answer.error || '远端任务操作失败');

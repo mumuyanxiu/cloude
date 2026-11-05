@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify detached tasks and interactive protocol
-        run: python3 tests/task-runner-test.py
+        run: |
+          python3 tests/task-runner-test.py
+          python3 tests/task-runner-unit-test.py
   windows:
     needs: linux-tasks
     runs-on: windows-latest

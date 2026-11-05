@@ -13,6 +13,7 @@ const archive = path.join(releaseDirectory, 'win-unpacked', 'resources', 'app.as
 const verifiedFiles = [];
 function walk(directory) {
   for (const entry of fs.readdirSync(path.join(root, directory), { withFileTypes: true })) {
+    if (entry.name === '__pycache__') continue; // Python test imports generate unshipped bytecode.
     const relative = path.join(directory, entry.name);
     if (entry.isDirectory()) walk(relative);
     else {
@@ -53,7 +54,7 @@ assert.equal(updateConfig.owner, packageInfo.build.publish[0].owner);
 assert.equal(updateConfig.repo, packageInfo.build.publish[0].repo);
 assert.ok(asar.listPackage(archive).every(name => !/(?:^|[\\/])(?:workspace\.json|credentials\.json|known-hosts\.json|\.runtime)(?:[\\/]|$)/.test(name)), 'User data must not enter the archive');
 const reportNames = process.argv.slice(2);
-if (!reportNames.length) reportNames.push('electron-smoke', 'renderer-flow', 'autoconnect-flow', 'usage-flow', 'commands-flow', 'folder-upload-flow', 'credentials-crossprocess', 'updates-flow', 'features-flow');
+if (!reportNames.length) reportNames.push('electron-smoke', 'renderer-flow', 'autoconnect-flow', 'usage-flow', 'commands-flow', 'folder-upload-flow', 'credentials-crossprocess', 'updates-flow', 'features-flow', 'project-history-flow');
 const integrationReports = reportNames.map(name => {
   assert.match(name, /^[a-z-]+$/, 'Invalid report name');
   const report = JSON.parse(fs.readFileSync(path.join(root, 'output', `${name}.json`)));

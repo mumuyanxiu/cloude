@@ -13,7 +13,57 @@ import time
 import uuid
 
 MAX_LOG = 32 * 1024 * 1024
-MAX_LINE = 1024 * 1024
+# CLI events can contain base64 images, which are larger than the source file.
+MAX_OUTPUT_LINE = 64 * 1024 * 1024
+MAX_EVENT_LINE = 16 * 1024 * 1024
+POLL_BYTES = 1024 * 1024
+
+
+def display_event(value):
+    """Omit binary copies from the display log, never from Claude's input."""
+    if isinstance(value, list):
+        return [display_event(item) for item in value]
+    if isinstance(value, dict):
+        return {key: '[base64 数据已省略]' if isinstance(item, str) and
+                (key == 'base64' or key == 'data' and value.get('type') == 'base64')
+                else display_event(item) for key, item in value.items()}
+    return value
+
+
+def read_output(stream, kind, events):
+    try:
+        while True:
+            line = stream.readline(MAX_OUTPUT_LINE + 1)
+            if not line:
+                break
+            if len(line) > MAX_OUTPUT_LINE:
+                events.put(('failure', b'Claude output line exceeds 64 MB'))
+                break
+            events.put((kind, line))
+    except Exception as error:
+        events.put(('failure', str(error).encode('utf-8')))
+    finally:
+        events.put((kind, None))
+
+
+def read_events(log, cursor):
+    records = []
+    with open(log, 'rb') as stream:
+        stream.seek(cursor)
+        while stream.tell() - cursor < POLL_BYTES:
+            before = stream.tell()
+            line = stream.readline(MAX_EVENT_LINE + 1)
+            if len(line) > MAX_EVENT_LINE:
+                raise ValueError('单条任务记录超过 16 MB，无法读取')
+            if not line or not line.endswith(b'\n'):
+                stream.seek(before)
+                break
+            # Return a large record alone so a poll stays within the SSH limit.
+            if records and stream.tell() - cursor > POLL_BYTES:
+                stream.seek(before)
+                break
+            records.append(json.loads(line))
+        return records, stream.tell()
 
 
 def atomic_json(target, value):
@@ -108,8 +158,8 @@ def worker(folder):
         atomic_json(folder / 'status.json', status)
 
     def record(event):
-        encoded = (json.dumps(event, ensure_ascii=False) + '\n').encode()
-        if len(encoded) > MAX_LINE or event_file.tell() + len(encoded) > MAX_LOG:
+        encoded = (json.dumps(display_event(event), ensure_ascii=False) + '\n').encode()
+        if len(encoded) > MAX_EVENT_LINE or event_file.tell() + len(encoded) > MAX_LOG:
             raise ValueError('任务输出超过保存限制，请缩小单次任务范围')
         event_file.write(encoded)
 
@@ -134,21 +184,8 @@ def worker(folder):
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         events = queue.Queue(maxsize=256)
 
-        def reader(stream, kind):
-            try:
-                while True:
-                    line = stream.readline(MAX_LINE + 1)
-                    if not line:
-                        break
-                    if len(line) > MAX_LINE:
-                        events.put(('failure', b'Claude output line exceeds 1 MB'))
-                        break
-                    events.put((kind, line))
-            finally:
-                events.put((kind, None))
-
         for stream, kind in [(child.stdout, 'stdout'), (child.stderr, 'stderr')]:
-            threading.Thread(target=reader, args=(stream, kind), daemon=True).start()
+            threading.Thread(target=read_output, args=(stream, kind, events), daemon=True).start()
         init_id = 'cloude-init-' + uuid.uuid4().hex
         write({'type': 'control_request', 'request_id': init_id, 'request': {'subtype': 'initialize', 'hooks': {}, 'sdkMcpServers': []}})
         initialized = False
@@ -292,24 +329,14 @@ def dispatch(data):
         cursor = data.get('cursor', 0)
         if not isinstance(cursor, int) or cursor < 0 or cursor > MAX_LOG:
             raise ValueError('任务游标无效')
-        records = []
         log = folder / 'events.jsonl'
         if log.is_symlink():
             raise ValueError('日志路径无效')
         if log.exists():
-            with open(log, 'rb') as stream:
-                stream.seek(cursor)
-                start = cursor
-                while stream.tell() - start < MAX_LINE:
-                    before = stream.tell()
-                    line = stream.readline(MAX_LINE + 1)
-                    if not line or not line.endswith(b'\n'):
-                        stream.seek(before)
-                        break
-                    records.append(json.loads(line))
-                cursor = stream.tell()
+            records, cursor = read_events(log, cursor)
             more = log.stat().st_size > cursor
         else:
+            records = []
             more = False
         return {'task': status, 'events': records, 'cursor': cursor, 'more': more}
     if action == 'reply':

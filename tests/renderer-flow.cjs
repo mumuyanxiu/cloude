@@ -32,6 +32,7 @@ async function run() {
   main.remote.clientFactory = () => { throw new Error('Real SSH forbidden in renderer-flow test'); };
   main.remote.connect = async config => { calls.connect.push(config); return { home: '/home/fixture', workspace: root, hostname: 'fixture-workspace', claudeAvailable: true, claudeVersion: 'fixture-only' }; };
   main.remote.disconnect = async () => {};
+  main.remote.listSessions = async () => ({ sessions: [] });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now(), message: '模拟设备未提供额度数据' });
   main.remote.mkdir = async remotePath => { calls.mkdir.push(remotePath); return { path: remotePath }; };
   main.remote.listFiles = async remotePath => [...remoteFiles].filter(([file]) => path.posix.dirname(file) === remotePath).map(([file, content]) => ({ name: path.posix.basename(file), path: file, type: 'file', size: Buffer.byteLength(content), mtime: 1234 }));
