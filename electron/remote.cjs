@@ -76,18 +76,17 @@ class JsonLines {
   end() { this.consume(this.decoder.end()); this.line(this.pending.trim()); this.pending = ''; }
 }
 
-function claudeCommand({ executable, projectPath, sessionId, mode, allowCommands, model }) {
+function claudeCommand({ executable, projectPath, sessionId, mode, model }) {
   if (!['plan', 'edit'].includes(mode)) throw new Error('未知的 Claude 权限模式。');
   assertString(executable, 'Claude 可执行文件', 4096);
-  const args = [executable, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--permission-mode', mode === 'plan' ? 'plan' : 'acceptEdits'];
+  const args = [executable, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  // Omit overrides so the CLI loads the same permission settings as the TUI.
+  if (mode === 'plan') args.push('--permission-mode', 'plan');
   if (sessionId) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(sessionId)) throw new Error('会话 ID 无效。');
     args.push('--resume', sessionId);
   }
   if (model) args.push('--model', assertString(model, '模型', 120));
-  if (allowCommands === true && mode === 'edit') args.push('--allowedTools', 'Bash');
-  else args.push('--disallowedTools', 'Bash');
   return `export PATH="$HOME/.local/bin:$PATH"; export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1; cd -- ${shellQuote(projectPath)} && exec ${args.map(shellQuote).join(' ')}`;
 }
 

@@ -117,7 +117,7 @@ async function run() {
       const job = calls.chat[0];
       assert.equal(job.projectPath, project);
       assert.equal(job.mode, 'edit');
-      assert.equal(job.allowCommands, true);
+      assert.equal(job.allowCommands, undefined);
       const emit = event => send({ kind: 'chat', jobId: job.jobId, conversationId: job.conversationId, type: 'event', event });
       emit({ type: 'system', subtype: 'init', session_id: 'fixture-session-123' });
       emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '模拟报告已' } } });
@@ -143,6 +143,60 @@ async function run() {
       await until(async () => { try { return (await fs.readFile(destination, 'utf8')) === remoteFiles.get(`${project}/report.txt`); } catch { return false; } }, 'downloaded bytes');
       assert.equal(calls.download[0], `${project}/report.txt`);
       assert.equal(await fs.readFile(destination, 'utf8'), remoteFiles.get(`${project}/report.txt`));
+    });
+
+    await check('streaming follows the bottom, preserves scrolled history, and resumes only on return', async () => {
+      await fill('textarea[aria-label="发送给 Claude 的消息"]', 'Stream a long fixture response');
+      await click('[aria-label="发送消息"]');
+      await until(() => calls.chat.length === 2, 'scroll fixture job');
+      const job = calls.chat.at(-1);
+      const emit = event => send({ kind: 'chat', jobId: job.jobId, conversationId: job.conversationId, type: 'event', event });
+      let fullText = '';
+      const append = text => { fullText += text; emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } }); };
+      const metrics = () => evaluate('(() => { const e=document.querySelector(".chat-scroll"); return { top:e.scrollTop, gap:e.scrollHeight-e.clientHeight-e.scrollTop, height:e.scrollHeight }; })()');
+      append(Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}: streaming fixture content.\n\n`).join(''));
+      await until(async () => (await metrics()).height > 1800 && (await metrics()).gap <= 2, 'initial bottom follow');
+      // Hidden Electron windows do not deliver wheel/scroll frames reliably.
+      // Move Chromium's scrollbar and dispatch the corresponding DOM event.
+      await evaluate('(() => { const e=document.querySelector(".chat-scroll");e.scrollTop-=450;e.dispatchEvent(new Event("scroll",{bubbles:true})); })()');
+      await until(async () => (await metrics()).gap > 200, 'scrollbar moves upward');
+      await pause(150);
+      const readingTop = (await metrics()).top;
+      append('Output arrives while reading history.\n\n'.repeat(12));
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Output arrives while reading history.")'), 'new streamed output');
+      await pause(150);
+      assert.ok(Math.abs((await metrics()).top - readingTop) <= 2, 'streaming must not move the reading position');
+      assert.ok(await evaluate('!!document.querySelector(".chat-latest")'));
+      // Simulate an image/tool result acquiring its final height after render.
+      await evaluate('(() => { const e=document.createElement("div"); e.style.height="160px"; e.id="late-content"; document.querySelector(".messages").append(e); })()');
+      await pause(100);
+      assert.ok(Math.abs((await metrics()).top - readingTop) <= 2, 'late layout growth must not move the reading position');
+      await click('.chat-latest');
+      await until(async () => (await metrics()).gap <= 2, 'return to latest');
+      append('Following resumed.\n\n'.repeat(8));
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Following resumed.")'), 'resumed output');
+      await until(async () => (await metrics()).gap <= 2, 'continued bottom follow');
+      await evaluate('document.getElementById("late-content").style.height="320px"');
+      await until(async () => (await metrics()).gap <= 2, 'late layout growth follows when already at bottom');
+      await evaluate('document.getElementById("late-content").remove()');
+      await evaluate('(() => { const e=document.querySelector(".chat-scroll");e.scrollTop=100;e.dispatchEvent(new Event("scroll",{bubbles:true})); })()');
+      await until(() => evaluate('!!document.querySelector(".chat-latest")'), 'manual scroll pauses again');
+      await evaluate('(() => { const e=document.querySelector(".chat-scroll");e.scrollTop=e.scrollHeight;e.dispatchEvent(new Event("scroll",{bubbles:true})); })()');
+      await until(() => evaluate('!document.querySelector(".chat-latest")'), 'manual return enables follow');
+      append('Manual return resumes output.\n\n'.repeat(8));
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Manual return resumes output.")'), 'manual resumed output');
+      await until(async () => (await metrics()).gap <= 2, 'manual bottom follow');
+      await evaluate('(() => { const e=document.querySelector(".chat-scroll");e.scrollTop=200;e.dispatchEvent(new Event("scroll",{bubbles:true})); })()');
+      await until(() => evaluate('!!document.querySelector(".chat-latest")'), 'pause before completion');
+      const finalTop = (await metrics()).top;
+      emit({ type: 'result', result: fullText, is_error: false });
+      send({ kind: 'chat', jobId: job.jobId, type: 'exit', code: 0 });
+      await until(() => evaluate('!!document.querySelector("[aria-label=发送消息]")'), 'finished scroll fixture');
+      assert.ok(Math.abs((await metrics()).top - finalTop) <= 2, 'completion must not jump to the end');
+      await clickText('新对话');
+      await until(() => evaluate('!!document.querySelector(".welcome")'), 'new conversation');
+      await click('.conversation-item[data-session-id="fixture-session-123"]');
+      await until(async () => await evaluate('!!document.querySelector(".chat-scroll")') && (await metrics()).gap <= 2, 'switching conversation resets follow');
     });
 
     await check('terminal form invokes command and displays actual emitted output', async () => {

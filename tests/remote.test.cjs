@@ -36,13 +36,15 @@ test('shell quoting treats apostrophes, substitutions and newlines as literal ar
   assert.equal(isWithin('/home/tester/work', '/home/tester'), false);
 });
 
-test('Claude commands preserve explicit session IDs and do not bypass permissions', () => {
+test('Claude commands inherit remote permissions and preserve explicit session IDs', () => {
   const command = claudeCommand({ executable: '/home/tester/a b/claude', projectPath: "/home/tester/work/a'b", mode: 'edit', sessionId: 'test-123', allowCommands: false });
   assert.match(command, /'--resume' 'test-123'/);
-  assert.match(command, /'--permission-mode' 'acceptEdits'/);
-  assert.match(command, /'--disallowedTools' 'Bash'/);
+  assert.doesNotMatch(command, /--permission-mode|--allowedTools|--disallowedTools/);
   assert.doesNotMatch(command, /dangerously-skip|bypassPermissions/);
-  assert.match(claudeCommand({ executable: 'claude', projectPath: '/work', mode: 'edit', allowCommands: true }), /'--allowedTools' 'Bash'/);
+  assert.doesNotMatch(claudeCommand({ executable: 'claude', projectPath: '/work', mode: 'edit', allowCommands: true }), /--permission-mode|--allowedTools|--disallowedTools/);
+  const plan = claudeCommand({ executable: 'claude', projectPath: '/work', mode: 'plan' });
+  assert.match(plan, /'--permission-mode' 'plan'/);
+  assert.doesNotMatch(plan, /--allowedTools|--disallowedTools/);
   assert.throws(() => claudeCommand({ executable: 'claude', projectPath: '/work', mode: 'edit', sessionId: 'foo;bar' }));
 });
 

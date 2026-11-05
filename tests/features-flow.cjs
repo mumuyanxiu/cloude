@@ -135,6 +135,7 @@ async function run() {
       await click('.composer-feature-options input');
       await fill('.composer textarea', 'Ask a fixture question'); await click('[aria-label="发送消息"]');
       await until(() => exists('.request-card'), 'question card');
+      assert.equal(await evaluate('document.querySelector(".request-actions").textContent.includes("本项目始终允许")'), false);
       await click('[aria-label="远端任务与恢复"]');
       await until(() => exists('.task-list .secondary-button'), 'running task list');
       await click('.task-list .secondary-button');
@@ -154,6 +155,7 @@ async function run() {
       await click('.request-actions .primary-button');
       await until(() => calls.replies.length === 1, 'answer submitted');
       assert.equal(calls.replies[0].answers['Choose a format'], 'PNG');
+      assert.equal(calls.replies[0].scope, 'once');
       await until(() => evaluate('document.querySelector(".messages").textContent.includes("Answered once.")'), 'durable completion');
       await until(async () => (await main.store.load()).conversations.some(c => c.task?.finished), 'finished state');
       const saved = await main.store.load();
@@ -168,6 +170,51 @@ async function run() {
       await until(async () => !(await exists('.request-card')) && await exists('[aria-label="发送消息"]'), 'completed UI');
       await pause(150);
       await fs.writeFile(path.resolve('output/features-fixture.png'), (await window.webContents.capturePage()).toPNG());
+    });
+    await check('tool approvals preserve once, deny and project scopes; failed submission can be retried', async () => {
+      const requests = [
+        { type: 'control_request', request_id: 'mcp-once', request: { subtype: 'can_use_tool', tool_name: 'mcp__fixture__inspect', input: { target: 'sample' } } },
+        { type: 'control_request', request_id: 'read-deny', request: { subtype: 'can_use_tool', tool_name: 'Read', input: { file_path: '/outside/diagram.png' }, blocked_path: '/outside/diagram.png', decision_reason: 'fixture path requires approval' } },
+        { type: 'control_request', request_id: 'mcp-project', request: { subtype: 'can_use_tool', tool_name: 'mcp__fixture__inspect', input: { target: 'sample' } } },
+      ];
+      let task; const events = []; const replies = []; let index = 0; let fail = true;
+      main.remote.startPersistentChat = async options => {
+        assert.equal(options.allowCommands, undefined); assert.equal(options.askCommands, undefined);
+        task = { jobId: options.jobId, conversationId: options.conversationId, projectPath, title: 'Permission fixture', state: 'waiting', createdAt: Date.now(), updatedAt: Date.now(), pendingRequests: [requests[index]] };
+        return { jobId: task.jobId };
+      };
+      main.remote.listTasks = async () => ({ tasks: task ? [task] : [] });
+      main.remote.pollTask = async options => ({ task, events: events.slice(options.cursor), cursor: events.length, more: false });
+      main.remote.replyTask = async options => {
+        if (options.scope === 'project' && fail) { fail = false; throw new Error('fixture retry'); }
+        replies.push(options); index++;
+        task = { ...task, state: index < requests.length ? 'waiting' : 'completed', pendingRequests: index < requests.length ? [requests[index]] : [] };
+        if (task.state === 'completed') events.push({ type: 'event', event: { type: 'result', subtype: 'success', result: 'Permissions complete.' } });
+      };
+      await fill('.composer textarea', 'Check permissions'); await click('[aria-label="发送消息"]');
+      await until(() => exists('.request-card'), 'tool permission card');
+      assert.ok(await evaluate('document.querySelector(".request-card").textContent.includes("所有调用")'));
+      await evaluate('[...document.querySelectorAll(".request-actions button")].find(b=>b.textContent==="仅允许这一次").click()');
+      await until(() => evaluate('document.querySelector(".request-card")?.textContent.includes("/outside/diagram.png")'), 'read permission details');
+      assert.equal(replies[0].scope, 'once'); assert.equal(replies[0].allow, true);
+      assert.ok(await evaluate('document.querySelector(".request-card").textContent.includes("fixture path requires approval")'));
+      await evaluate('[...document.querySelectorAll(".request-actions button")].find(b=>b.textContent==="拒绝").click()');
+      await until(() => evaluate('document.querySelector(".request-card")?.textContent.includes("mcp__fixture__inspect")'), 'project permission card');
+      assert.equal(replies[1].scope, 'once'); assert.equal(replies[1].allow, false);
+      await evaluate('[...document.querySelectorAll(".request-actions button")].find(b=>b.textContent==="本项目始终允许此工具").click()');
+      await until(() => evaluate('document.querySelector(".request-card .feature-error")?.textContent.includes("fixture retry")'), 'retry error');
+      assert.equal(await evaluate('[...document.querySelectorAll(".request-actions button")].some(b=>b.disabled)'), false);
+      const cardLayout = await evaluate('(() => { const card=document.querySelector(".request-card").getBoundingClientRect(); const actions=document.querySelector(".request-actions").getBoundingClientRect(); return {top:card.top,bottom:card.bottom,height:card.height,actionsBottom:actions.bottom,viewport:innerHeight}; })()');
+      assert.ok(cardLayout.height > 100 && cardLayout.top >= 0 && cardLayout.bottom <= cardLayout.viewport, JSON.stringify(cardLayout));
+      assert.ok(cardLayout.actionsBottom <= cardLayout.bottom, 'approval choices must be visible without clipping');
+      await window.webContents.capturePage();
+      await pause(150);
+      await fs.writeFile(path.resolve('output/permissions-fixture.png'), (await window.webContents.capturePage()).toPNG());
+      await evaluate('[...document.querySelectorAll(".request-actions button")].find(b=>b.textContent==="本项目始终允许此工具").click()');
+      await until(() => replies.length === 3, 'project permission submitted');
+      assert.equal(replies[2].scope, 'project'); assert.equal(replies[2].allow, true);
+      assert.equal(replies[2].projectPath, projectPath); assert.equal(replies[2].requestId, 'mcp-project');
+      await until(() => evaluate('document.querySelector(".messages").textContent.includes("Permissions complete.")'), 'permissions completion');
     });
     const report = { passed: checks.length, checks, actualElectronIPC: true, actualClipboard: true, sftpBoundary: 'LocalSftp', actualClaudeInference: false };
     await fs.writeFile(path.resolve('output/features-flow.json'), JSON.stringify(report, null, 2));

@@ -84,6 +84,52 @@ class Output(unittest.TestCase):
                     RUNNER.read_events(log, 0)
 
 
+class Permissions(unittest.TestCase):
+    def test_default_and_legacy_preferences_inherit_remote_rules(self):
+        for legacy in ({}, {'allowCommands': True}, {'allowCommands': False}, {'askCommands': True}):
+            args = RUNNER.claude_args({'executable': 'claude', 'mode': 'edit', 'sessionId': 'existing', **legacy})
+            for flag in ('--permission-mode', '--allowedTools', '--disallowedTools', '--settings', '--setting-sources'):
+                self.assertNotIn(flag, args)
+            self.assertEqual(args[-2:], ['--resume', 'existing'])
+        plan = RUNNER.claude_args({'executable': 'claude', 'mode': 'plan', 'allowCommands': True})
+        self.assertEqual(plan[-2:], ['--permission-mode', 'plan'])
+        self.assertNotIn('--disallowedTools', plan)
+
+    def test_once_and_deny_do_not_persist_and_preserve_original_input(self):
+        tool = {'tool_name': 'Read', 'input': {'file_path': '/outside/picture.png'}}
+        response = RUNNER.permission_response(tool, {'allow': True})
+        self.assertEqual(response, {'behavior': 'allow', 'updatedInput': tool['input']})
+        self.assertEqual(RUNNER.permission_response(tool, {'allow': False})['behavior'], 'deny')
+        self.assertNotIn('updatedPermissions', RUNNER.permission_response(tool, {'allow': False}))
+
+    def test_project_rule_uses_only_the_pending_tool_and_native_local_destination(self):
+        for name in ('Bash', 'Read', 'Edit', 'mcp__server-name__tool_name'):
+            tool = {'tool_name': name, 'input': {'fixture': True},
+                    'permission_suggestions': [{'type': 'setMode', 'mode': 'bypassPermissions'}]}
+            response = RUNNER.permission_response(tool, {'allow': True, 'scope': 'project', 'toolName': '*',
+                'updatedPermissions': [{'type': 'setMode', 'mode': 'bypassPermissions'}]})
+            self.assertEqual(response['updatedInput'], tool['input'])
+            self.assertEqual(response['updatedPermissions'], [{'type': 'addRules', 'rules': [{'toolName': name}],
+                             'behavior': 'allow', 'destination': 'localSettings'}])
+
+    def test_invalid_scopes_denials_questions_and_tool_patterns_cannot_persist(self):
+        for name in ('AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode', '*', 'Bash(*)', '', 'mcp__server__*'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                RUNNER.permission_response({'tool_name': name}, {'allow': True, 'scope': 'project'})
+        for data in ({'allow': False, 'scope': 'project'}, {'allow': True, 'scope': 'user'}, {'allow': 'true'}):
+            with self.assertRaises(ValueError):
+                RUNNER.permission_response({'tool_name': 'Bash'}, data)
+
+    def test_questions_still_require_answers_and_never_save_permissions(self):
+        tool = {'tool_name': 'AskUserQuestion', 'input': {'questions': [{'question': 'Format?'}]}}
+        with self.assertRaisesRegex(ValueError, '所有问题'):
+            RUNNER.permission_response(tool, {'allow': True})
+        response = RUNNER.permission_response(tool, {'allow': True, 'answers': {'Format?': 'PNG'}})
+        self.assertEqual(response['updatedInput']['answers'], {'Format?': 'PNG'})
+        self.assertNotIn('answers', tool['input'])
+        self.assertNotIn('updatedPermissions', response)
+
+
 class Protocol(unittest.TestCase):
     def run_worker(self, prompt):
         temporary = tempfile.TemporaryDirectory(prefix='cloude-output-test-')

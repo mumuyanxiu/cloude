@@ -101,13 +101,13 @@ function installRemoteFeatures(RemoteClient, shellQuote) {
     },
     async listTasks({ projectPath }) { return this.taskRequest(projectPath, 'list'); },
     async pollTask({ projectPath, jobId, cursor = 0 }) { return this.taskRequest(projectPath, 'poll', { jobId, cursor }); },
-    async replyTask({ projectPath, jobId, requestId, allow, answers }) { return this.taskRequest(projectPath, 'reply', { jobId, requestId, allow, answers }); },
+    async replyTask({ projectPath, jobId, requestId, allow, answers, scope = 'once' }) { return this.taskRequest(projectPath, 'reply', { jobId, requestId, allow, answers, scope }); },
     async stopTask({ projectPath, jobId }) { return this.taskRequest(projectPath, 'stop', { jobId }); },
     async startPersistentChat(options) {
       if (typeof options.prompt !== 'string' || !options.prompt.trim() || Buffer.byteLength(options.prompt) > 512 * 1024) throw new Error('消息为空或过长');
       if (!['plan', 'edit'].includes(options.mode)) throw new Error('权限模式无效');
       return this.taskRequest(options.projectPath, 'start', { jobId: options.jobId, conversationId: options.conversationId,
-        prompt: options.prompt, sessionId: options.sessionId, mode: options.mode, allowCommands: options.allowCommands === true, askCommands: options.askCommands === true,
+        prompt: options.prompt, sessionId: options.sessionId, mode: options.mode,
         executable: this.claudePath, title: options.prompt.slice(0, 80) });
     },
   });

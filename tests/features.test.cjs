@@ -59,6 +59,22 @@ test('task prompts travel on stdin and helper code is fixed, even with shell cha
   assert.doesNotMatch(captured.command, /literal \$\(touch forbidden\) secret/);
   assert.equal(JSON.parse(captured.options.input).prompt, 'literal $(touch forbidden) secret');
   assert.match(JSON.parse(captured.options.input).runnerSource, /Per-task Claude/);
+  assert.equal(JSON.parse(captured.options.input).allowCommands, undefined);
+  assert.equal(JSON.parse(captured.options.input).askCommands, undefined);
+});
+
+test('approval scope crosses the task transport without renderer-supplied permission rules', async () => {
+  const remote = new RemoteClient();
+  const calls = [];
+  remote.taskRequest = async (...args) => { calls.push(args); };
+  const options = { projectPath: '/project', jobId: 'job', requestId: 'approval', allow: true };
+  await remote.replyTask(options);
+  await remote.replyTask({ ...options, scope: 'project', toolName: 'Bash', updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions' }] });
+  assert.deepEqual(calls.map(call => call[2].scope), ['once', 'project']);
+  assert.equal(calls[1][0], '/project');
+  assert.equal(calls[1][1], 'reply');
+  assert.equal(calls[1][2].toolName, undefined);
+  assert.equal(calls[1][2].updatedPermissions, undefined);
 });
 
 test('task polling can transport a complete saved event larger than 4 MB', async () => {

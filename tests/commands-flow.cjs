@@ -96,11 +96,11 @@ async function run() {
 
   try {
     await until(() => evaluate('document.querySelector(".connection-button")?.textContent === "已连接"'), 'automatic fixture connection');
-    await check('new settings enable shell commands by default and Ctrl+Enter sends once', async () => {
-      assert.ok(await evaluate('document.querySelector(".permission-button")?.textContent.includes("可运行命令")'));
+    await check('new settings inherit remote permissions and Ctrl+Enter sends once', async () => {
+      assert.ok(await evaluate('document.querySelector(".permission-button")?.textContent.includes("继承远端权限")'));
       await type(chatInput, '检查模拟项目。'); await key('Return', ['control']);
       await until(() => calls.chat.length === 1, 'default chat');
-      assert.equal(calls.chat[0].allowCommands, true);
+      assert.equal(calls.chat[0].allowCommands, undefined);
       assert.equal(calls.chat[0].mode, 'edit');
       assert.equal(calls.chat[0].prompt, '检查模拟项目。');
       await completeChat();
@@ -153,30 +153,33 @@ async function run() {
       assert.equal(await value(chatInput), '');
     });
 
-    await check('local permissions opens settings and disabled shell permission survives reload', async () => {
+    await check('permissions explain native rules and legacy command switches no longer affect reloaded tasks', async () => {
       const before = calls.chat.length;
       await type(chatInput, '/permissions'); await key('Return', ['control']);
       await until(() => exists('[role="dialog"][aria-label="工作台权限设置"]'), 'local permissions dialog');
       assert.equal(calls.chat.length, before);
-      await click('.modal input[type="checkbox"]'); await clickText('完成');
-      await until(async () => (await main.store.load()).settings.allowCommands === false, 'disabled shell preference persisted');
+      assert.ok(await evaluate('document.querySelector(".modal").textContent.includes("Bash 与 MCP")'));
+      assert.ok(await evaluate('document.querySelector(".modal").textContent.includes("无法显示审批卡")'));
+      await clickText('完成');
+      const saved = await main.store.load();
+      await main.store.save({ ...saved, settings: { ...saved.settings, allowCommands: false, askCommands: false } });
       await main.store.queue;
       await window.loadFile(path.resolve(__dirname, '..', 'dist', 'index.html'));
       await until(() => evaluate('document.querySelector(".connection-button")?.textContent === "已连接"'), 'reloaded auto connection');
-      assert.ok(await evaluate('document.querySelector(".permission-button")?.textContent.includes("命令需手动运行")'));
-      await type(chatInput, '只编辑文件。'); await key('Return', ['control']);
+      assert.ok(await evaluate('document.querySelector(".permission-button")?.textContent.includes("继承远端权限")'));
+      await type(chatInput, '按远端权限工作。'); await key('Return', ['control']);
       await until(() => calls.chat.length === before + 1, 'chat after permission reload');
-      assert.equal(calls.chat.at(-1).allowCommands, false);
+      assert.equal(calls.chat.at(-1).allowCommands, undefined);
+      assert.equal(calls.chat.at(-1).askCommands, undefined);
       await completeChat();
     });
 
-    await check('plan mode disables shell even when the saved command setting is enabled', async () => {
-      await click('.permission-button'); await click('.modal input[type="checkbox"]'); await clickText('完成');
+    await check('plan mode remains an explicit choice without Bash-specific overrides', async () => {
       await evaluate(`(() => { const e=document.querySelector('select[aria-label="Claude 工作模式"]'); e.value='plan'; e.dispatchEvent(new Event('change',{bubbles:true})); })()`);
       const before = calls.chat.length;
       await type(chatInput, '仅分析模拟项目。'); await key('Return', ['control']);
       await until(() => calls.chat.length === before + 1, 'plan mode chat');
-      assert.equal(calls.chat.at(-1).mode, 'plan'); assert.equal(calls.chat.at(-1).allowCommands, false);
+      assert.equal(calls.chat.at(-1).mode, 'plan'); assert.equal(calls.chat.at(-1).allowCommands, undefined);
       await completeChat();
     });
 

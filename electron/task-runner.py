@@ -141,6 +141,49 @@ def terminate(child):
         pass
 
 
+def claude_args(config):
+    if config.get('mode') not in ('edit', 'plan'):
+        raise ValueError('权限模式无效')
+    args = [config['executable'], '-p', '--output-format', 'stream-json', '--input-format', 'stream-json',
+            '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio']
+    # Normal tasks inherit user/project/local settings, including the default mode.
+    # Legacy allowCommands/askCommands values must not add Bash-only overrides.
+    if config['mode'] == 'plan':
+        args += ['--permission-mode', 'plan']
+    if config.get('sessionId'):
+        args += ['--resume', valid_id(config['sessionId'])]
+    return args
+
+
+def permission_response(tool, data):
+    scope = data.get('scope', 'once')
+    if scope not in ('once', 'project') or not isinstance(data.get('allow'), bool):
+        raise ValueError('授权选项无效')
+    name = tool.get('tool_name', '')
+    if scope == 'project' and (data['allow'] is not True or
+            name in ('AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode') or
+            not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.:-]{0,255}', name)):
+        raise ValueError('此请求不支持项目长期授权')
+    if not data['allow']:
+        return {'behavior': 'deny', 'message': '用户拒绝了此操作'}
+    updated = dict(tool.get('input', {}))
+    if name == 'AskUserQuestion':
+        answers = data.get('answers', {})
+        if not isinstance(answers, dict) or any(not isinstance(v, str) or len(v) > 10000 for v in answers.values()):
+            raise ValueError('回答格式无效')
+        if any(not answers.get(q['question'], '').strip() for q in updated.get('questions', [])):
+            raise ValueError('请回答所有问题')
+        updated['answers'] = answers
+    response = {'behavior': 'allow', 'updatedInput': updated}
+    if scope == 'project':
+        # The pending request, not renderer-supplied rules, identifies the tool.
+        # Claude persists and applies this via its native protocol, preserving
+        # deny/ask rules and resolving the local settings location itself.
+        response['updatedPermissions'] = [{'type': 'addRules', 'rules': [{'toolName': name}],
+                                           'behavior': 'allow', 'destination': 'localSettings'}]
+    return response
+
+
 def worker(folder):
     config = read_json(folder / 'config.json')
     status = read_json(folder / 'status.json')
@@ -168,15 +211,7 @@ def worker(folder):
         child.stdin.flush()
 
     try:
-        args = [config['executable'], '-p', '--output-format', 'stream-json', '--input-format', 'stream-json',
-                '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio',
-                '--permission-mode', 'plan' if config['mode'] == 'plan' else 'acceptEdits']
-        if config.get('sessionId'):
-            args += ['--resume', valid_id(config['sessionId'])]
-        if config['mode'] == 'plan' or not config.get('allowCommands') and not config.get('askCommands'):
-            args += ['--disallowedTools', 'Bash']
-        elif config.get('allowCommands'):
-            args += ['--allowedTools', 'Bash']
+        args = claude_args(config)
         env = dict(os.environ)
         env['PATH'] = str(Path.home() / '.local/bin') + ':' + env.get('PATH', '')
         env['CLAUDE_CODE_DISABLE_BACKGROUND_TASKS'] = '1'
@@ -311,7 +346,7 @@ def dispatch(data):
         status = {'jobId': job_id, 'conversationId': data.get('conversationId', ''), 'projectPath': project,
                   'title': data.get('title', '')[:80], 'state': 'starting', 'createdAt': now, 'updatedAt': now,
                   'sessionId': data.get('sessionId'), 'pendingRequests': []}
-        config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode', 'allowCommands', 'askCommands']}
+        config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode']}
         config['projectPath'] = project
         atomic_json(folder / 'config.json', config)
         atomic_json(folder / 'status.json', status)
@@ -346,16 +381,7 @@ def dispatch(data):
         request = next((r for r in status['pendingRequests'] if r['request_id'] == request_id), None)
         if not request:
             raise ValueError('该问题已结束，请刷新任务')
-        tool = request['request']
-        updated = dict(tool.get('input', {}))
-        if tool.get('tool_name') == 'AskUserQuestion' and data.get('allow'):
-            answers = data.get('answers', {})
-            if not isinstance(answers, dict) or any(not isinstance(v, str) or len(v) > 10000 for v in answers.values()):
-                raise ValueError('回答格式无效')
-            if any(not answers.get(q['question'], '').strip() for q in updated.get('questions', [])):
-                raise ValueError('请回答所有问题')
-            updated['answers'] = answers
-        response = {'behavior': 'allow', 'updatedInput': updated} if data.get('allow') is True else {'behavior': 'deny', 'message': '用户拒绝了此操作'}
+        response = permission_response(request['request'], data)
         value = {'type': 'control_response', 'response': {'subtype': 'success', 'request_id': request_id, 'response': response}}
         target = folder / 'responses' / (hashlib.sha256(request_id.encode()).hexdigest() + '.json')
         if target.exists():
