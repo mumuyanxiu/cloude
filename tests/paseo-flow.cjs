@@ -283,6 +283,13 @@ async function run() {
       }, 'application and connected daemon versions in About settings').catch(error => {
         throw new Error(`${error.message}\n${lastText}`);
       });
+      const applicationRow = await desktop.page.evaluate(`(() => {
+        const label = Array.from(document.querySelectorAll('*')).find(element =>
+          element.childElementCount === 0 && ['应用版本', 'App version'].includes(element.textContent.trim()));
+        return label?.parentElement?.parentElement?.innerText || '';
+      })()`);
+      assert.ok(applicationRow.includes(`v${packageInfo.version}`), 'The application version row must show Cloude 2.0.0');
+      assert.ok(!applicationRow.includes(`v${engineLock.version}`), 'The application version row must not show the daemon version');
       assert.ok(!/Version differs from this device|版本与此设备不同/.test(text), 'Matching engine versions must not show a daemon mismatch');
     });
     if (process.env.CLOUDE_TEST_REAL_CODEX === '1') {
