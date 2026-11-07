@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { app, clipboard, ClipboardItem, dialog, shell } = require('electron');
 const { LocalSftp } = require('./helpers/local-sftp.cjs');
+const { StateStore } = require('../electron/state.cjs');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, label) { for (let i = 0; i < 250; i++) { if (await check()) return; await pause(40); } throw new Error('Timed out: ' + label); }
 
@@ -15,7 +16,6 @@ async function run() {
   process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = path.join(root, 'state');
   const original = [];
   for (const item of await clipboard.read()) { const values = {}; for (const type of item.types) { try { values[type] = await item.getType(type); } catch {} } if (Object.keys(values).length) original.push(new ClipboardItem(values)); }
-  const main = require('../electron/main.cjs');
   const projectPath = '/home/tester/work/project';
   const sftp = new LocalSftp(path.join(root, 'remote'));
   await fs.mkdir(sftp.native(projectPath), { recursive: true });
@@ -27,8 +27,13 @@ async function run() {
   let clipboardPng;
   await fs.writeFile(sftp.native(projectPath + '/figure.png'), png);
   const config = { host: 'fixture', port: 22, username: 'tester', authType: 'agent', workspace: '/home/tester/work', claudePath: 'claude', autoConnect: true };
-  await main.store.save({ connection: config, projects: [{ id: 'project', name: 'project', path: projectPath, connectionKey: 'tester@fixture:22:/home/tester/work' }], conversations: [], settings: { durableTasks: false } });
-  main.remote.clientFactory = () => { throw new Error('Real user SSH forbidden'); };
+  await new StateStore(process.env.CLOUDE_DATA).save({ connection: config, projects: [{ id: 'project', name: 'project', path: projectPath, connectionKey: 'tester@fixture:22:/home/tester/work' }], conversations: [], settings: { durableTasks: false } });
+  // Exercise the fastest startup path only after every fixture exists. Keep
+  // mock installation synchronous until main.ready yields to the renderer.
+  await app.whenReady();
+  const main = require('../electron/main.cjs');
+  let realSshAttempts = 0;
+  main.remote.clientFactory = () => { realSshAttempts++; throw new Error('Real user SSH forbidden'); };
   main.remote.connect = async () => { main.remote.client = {}; main.remote.sftp = sftp; main.remote.home = '/home/tester'; main.remote.workspace = '/home/tester/work'; main.remote.workspaceInput = '/home/tester/work'; return { home: '/home/tester', workspace: '/home/tester/work', hostname: 'fixture', claudeAvailable: true }; };
   main.remote.disconnect = async () => { main.remote._emit({ kind: 'connection', status: 'disconnected' }); };
   main.remote.listSessions = async () => ({ sessions: [] });
@@ -250,7 +255,8 @@ async function run() {
       assert.equal(replies[2].projectPath, projectPath); assert.equal(replies[2].requestId, 'mcp-project');
       await until(() => evaluate('document.querySelector(".messages").textContent.includes("Permissions complete.")'), 'permissions completion');
     });
-    const report = { passed: checks.length, checks, actualElectronIPC: true, actualClipboard: true, sftpBoundary: 'LocalSftp', actualClaudeInference: false };
+    assert.equal(realSshAttempts, 0, 'All connections must use the isolated remote fixture');
+    const report = { passed: checks.length, checks, actualElectronIPC: true, actualClipboard: true, sftpBoundary: 'LocalSftp', realSshAttempts, actualClaudeInference: false };
     await fs.writeFile(path.resolve('output/features-flow.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } finally {

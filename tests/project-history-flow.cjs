@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { app, dialog, shell } = require('electron');
+const { StateStore } = require('../electron/state.cjs');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, label) {
   for (let i = 0; i < 250; i++) { if (await check()) return; await pause(30); }
@@ -14,14 +15,15 @@ async function until(check, label) {
 async function run() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cloude-project-history-'));
   process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = path.join(root, 'state');
-  const main = require('../electron/main.cjs');
   const config = { host: 'fixture-history', port: 22, username: 'fixture', authType: 'agent', workspace: '/project', claudePath: 'claude' };
   const connectionKey = 'fixture@fixture-history:22:/project';
   const projects = ['a', 'b'].map(name => ({ id: name, name: 'Project ' + name.toUpperCase(), path: '/project/' + name, connectionKey }));
   const local = { id: 'local-a', projectId: 'a', sessionId: 'session-a-local', title: '已有本地对话', updatedAt: 10,
     messages: [{ id: 'local-message', role: 'assistant', content: '保留本地工具和聊天内容' }] };
-  await main.store.save({ connection: config, projects, conversations: [local],
+  await new StateStore(process.env.CLOUDE_DATA).save({ connection: config, projects, conversations: [local],
     settings: { activeProjectId: 'a', activeConversationId: local.id, durableTasks: false } });
+  await app.whenReady();
+  const main = require('../electron/main.cjs');
   const sessions = {
     '/project/a': [{ sessionId: 'session-a-local', title: '服务器上的旧标题', updatedAt: 30 }, { sessionId: 'session-a-old', title: 'A 的远端历史', updatedAt: 20 }],
     '/project/b': [{ sessionId: 'session-b', title: 'B 的远端历史', updatedAt: 25 }],

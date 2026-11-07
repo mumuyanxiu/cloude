@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { app, dialog, shell } = require('electron');
+const { StateStore } = require('../electron/state.cjs');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, label) {
   for (let attempt = 0; attempt < 250; attempt++) { if (await check()) return; await pause(40); }
@@ -11,10 +12,11 @@ async function until(check, label) {
 async function run() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-updates-flow-'));
   process.env.CLOUDE_TEST = '1'; process.env.CLOUDE_DATA = directory;
-  const main = require('../electron/main.cjs');
   const config = { host: 'fixture', port: 22, username: 'fixture', authType: 'agent', workspace: '/home/fixture/workspace', claudePath: 'claude', autoConnect: true };
   const projectPath = `${config.workspace}/sample`;
-  await main.store.save({ connection: config, projects: [{ id: 'project', name: 'sample', path: projectPath, connectionKey: `fixture@fixture:22:${config.workspace}` }], conversations: [] });
+  await new StateStore(process.env.CLOUDE_DATA).save({ connection: config, projects: [{ id: 'project', name: 'sample', path: projectPath, connectionKey: `fixture@fixture:22:${config.workspace}` }], conversations: [] });
+  await app.whenReady();
+  const main = require('../electron/main.cjs');
   main.remote.clientFactory = () => { throw new Error('Real SSH forbidden'); };
   main.remote.connect = async () => ({ home: '/home/fixture', workspace: config.workspace, hostname: 'fixture', claudeAvailable: true });
   main.remote.disconnect = async () => {};
