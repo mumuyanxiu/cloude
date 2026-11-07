@@ -115,6 +115,7 @@ const integrationReports = reportNames.map(name => {
     assert.equal(report.actualDefaultEntry, true);
     assert.equal(report.actualBundledDaemon, true);
     assert.equal(report.actualNativePty, true);
+    assert.equal(report.actualSettingsVersions, true);
   }
   if (name === 'paseo-packaged-flow') {
     assert.equal(path.resolve(report.packagedExecutable), path.join(releaseDirectory, 'win-unpacked', 'Cloude.exe'));

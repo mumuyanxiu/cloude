@@ -225,7 +225,11 @@ async function run() {
   await fs.writeFile(path.join(dataDirectory, 'credentials.json'), previousCredentials);
   const daemonPort = await freePort();
   await fs.mkdir(path.join(dataDirectory, 'paseo'));
-  await fs.writeFile(path.join(dataDirectory, 'paseo', 'config.json'), JSON.stringify({ version: 1, daemon: { listen: `127.0.0.1:${daemonPort}`, relay: { enabled: false } } }));
+  await fs.writeFile(path.join(dataDirectory, 'paseo', 'config.json'), JSON.stringify({
+    version: 1,
+    daemon: { listen: `127.0.0.1:${daemonPort}`, relay: { enabled: false } },
+    features: { dictation: { enabled: false }, voiceMode: { enabled: false } },
+  }));
   const checks = [];
   let desktop;
   const check = async (name, callback) => {
@@ -267,6 +271,20 @@ async function run() {
       assert.equal(await fs.readFile(path.join(dataDirectory, 'credentials.json'), 'utf8'), previousCredentials);
     });
     await check('bundled native PTY executes a command in its workspace and closes cleanly', () => verifyTerminal(firstStatus, temporaryRoot));
+    await check('About settings show Cloude 2.0.0 and the engine without a version mismatch', async () => {
+      await desktop.page.evaluate('document.querySelector(\'[data-testid="sidebar-settings"]\').click()');
+      await until(() => desktop.page.evaluate('Array.from(document.querySelectorAll(\'[role="button"]\')).some(element => ["关于", "About"].includes(element.innerText.trim()))'), 'About settings button');
+      await desktop.page.evaluate('Array.from(document.querySelectorAll(\'[role="button"]\')).find(element => ["关于", "About"].includes(element.innerText.trim())).click()');
+      let lastText = '';
+      const text = await until(async () => {
+        const body = await desktop.page.evaluate('document.body?.innerText || ""').catch(() => '');
+        lastText = body;
+        return body.includes(`v${packageInfo.version}`) && body.includes(`v${engineLock.version}`) ? body : null;
+      }, 'application and connected daemon versions in About settings').catch(error => {
+        throw new Error(`${error.message}\n${lastText}`);
+      });
+      assert.ok(!/Version differs from this device|版本与此设备不同/.test(text), 'Matching engine versions must not show a daemon mismatch');
+    });
     if (process.env.CLOUDE_TEST_REAL_CODEX === '1') {
       await check('authenticated Codex completes one real model turn through the bundled daemon', () => verifyCodex(firstStatus, temporaryRoot));
     }
@@ -290,14 +308,22 @@ async function run() {
     await fs.writeFile(screenshot, Buffer.from(capture.data, 'base64'));
     await closeDesktop(desktop);
     desktop = null;
-    const report = { version: packageInfo.version, passed: checks.length, checks, screenshot, testDataDirectory: temporaryRoot, actualDefaultEntry: true, actualBundledDaemon: true, actualNativePty: true, packagedExecutable: packagedExecutable || null, realModelRequest: process.env.CLOUDE_TEST_REAL_CODEX === '1' };
+    const report = { version: packageInfo.version, passed: checks.length, checks, screenshot, testDataDirectory: temporaryRoot, actualDefaultEntry: true, actualBundledDaemon: true, actualNativePty: true, actualSettingsVersions: true, packagedExecutable: packagedExecutable || null, realModelRequest: process.env.CLOUDE_TEST_REAL_CODEX === '1' };
     const reportName = packagedExecutable ? 'paseo-packaged-flow.json' : 'paseo-flow.json';
     await fs.writeFile(path.join(root, 'output', reportName), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
   } finally {
     if (desktop) {
-      desktop.page.close();
-      desktop.child.kill();
+      await desktop.page.evaluate(`(async () => {
+        const status = await window.paseoDesktop.invoke('desktop_daemon_status');
+        if (status.home === ${JSON.stringify(path.join(dataDirectory, 'paseo'))} && status.pid) {
+          await window.paseoDesktop.invoke('stop_desktop_daemon', { pid: status.pid, startedAt: status.startedAt });
+        }
+      })()`).catch(() => {});
+      await closeDesktop(desktop).catch(() => {
+        desktop.page.close();
+        desktop.child.kill();
+      });
     }
     console.log(`TEST_DATA_DIRECTORY ${temporaryRoot}`);
   }

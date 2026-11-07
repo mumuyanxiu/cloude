@@ -69,6 +69,39 @@ function patchPaseo(source) {
   replace(source, 'packages/app/src/desktop/updates/desktop-updates.ts',
     'https://github.com/getpaseo/paseo/releases/download',
     'https://github.com/mumuyanxiu/cloude/releases/download');
+  replace(source, 'packages/app/src/desktop/updates/desktop-updates.ts',
+    'export function isVersionMismatch(',
+    `export const BUNDLED_ENGINE_VERSION = ${JSON.stringify(require('../paseo-lock.json').version)};\n\nexport function isVersionMismatch(`);
+  replace(source, 'packages/app/src/desktop/updates/desktop-updates.ts',
+    '  return app !== daemon;',
+    '  return normalizeVersionForComparison(BUNDLED_ENGINE_VERSION) !== daemon;');
+  replace(source, 'packages/app/src/utils/app-version.ts',
+    'export function resolveAppVersion(): string | null {',
+    `export const CLOUDE_APP_VERSION = ${JSON.stringify(require('../package.json').version)};\n\nexport function resolveAppVersion(): string | null {\n  return CLOUDE_APP_VERSION;\n}\n\nexport function resolvePaseoEngineVersion(): string | null {`);
+  for (const file of ['packages/app/src/runtime/host-runtime.ts', 'packages/app/src/plugins/registry.ts']) {
+    replace(source, file, 'resolveAppVersion', 'resolvePaseoEngineVersion');
+  }
+  replace(source, 'packages/app/src/utils/test-daemon-connection.ts',
+    'import { resolveAppVersion } from "./app-version";',
+    'import { resolvePaseoEngineVersion } from "./app-version";');
+  replace(source, 'packages/app/src/utils/test-daemon-connection.ts',
+    '\n  resolveAppVersion,\n',
+    '\n  resolveAppVersion: resolvePaseoEngineVersion,\n');
+  replace(source, 'packages/app/src/screens/settings-screen.tsx',
+    'import { resolveAppVersion } from "@/utils/app-version";',
+    'import { resolveAppVersion, resolvePaseoEngineVersion } from "@/utils/app-version";');
+  replace(source, 'packages/app/src/screens/settings-screen.tsx',
+    '<ConnectedHostsSection clientVersion={appVersion} />',
+    '<ConnectedHostsSection clientVersion={resolvePaseoEngineVersion()} />');
+  replace(source, 'packages/app/src/screens/settings-screen.tsx',
+    '\n  appVersion: string | null;\n  appVersionText:',
+    '\n  appVersionText:');
+  replace(source, 'packages/app/src/screens/settings-screen.tsx',
+    'function AboutSection({ appVersion, appVersionText, isDesktopApp }:',
+    'function AboutSection({ appVersionText, isDesktopApp }:');
+  replace(source, 'packages/app/src/screens/settings-screen.tsx',
+    '<AboutSection\n              appVersion={appVersion}\n',
+    '<AboutSection\n');
   replace(source, 'packages/app/src/desktop/updates/rosetta-callout-source.tsx',
     'https://paseo.sh/download',
     'https://github.com/mumuyanxiu/cloude/releases/latest');

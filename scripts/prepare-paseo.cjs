@@ -18,7 +18,7 @@ const requiredRuntimeFiles = ['desktop-dist/main.js', 'desktop-dist/preload.js',
 
 function buildFingerprint() {
   const hash = crypto.createHash('sha256');
-  for (const file of ['paseo-lock.json', 'scripts/patch-paseo.cjs', 'scripts/patch-paseo-editor-close.cjs', 'scripts/patch-paseo-quit.cjs', 'scripts/paseo-cloude-quit.ts', 'scripts/verify-paseo-editor-close.cjs', 'scripts/verify-paseo-quit.cjs', 'scripts/prepare-paseo.cjs', 'scripts/paseo-runtime-package.json', 'scripts/paseo-runtime-lock.json', 'assets/claude-icon.png']) {
+  for (const file of ['paseo-lock.json', 'scripts/patch-paseo.cjs', 'scripts/patch-paseo-editor-close.cjs', 'scripts/patch-paseo-quit.cjs', 'scripts/paseo-cloude-quit.ts', 'scripts/verify-paseo-editor-close.cjs', 'scripts/verify-paseo-quit.cjs', 'scripts/verify-paseo-versions.cjs', 'scripts/prepare-paseo.cjs', 'scripts/paseo-runtime-package.json', 'scripts/paseo-runtime-lock.json', 'assets/claude-icon.png']) {
     hash.update(fs.readFileSync(path.join(root, file)));
   }
   hash.update(`${process.platform}-${process.arch}-${process.versions.node}-${require('../package.json').version}`);
@@ -191,6 +191,7 @@ async function main() {
   patchPaseo(source);
   await require('./verify-paseo-editor-close.cjs').verifyPaseoEditorClose(source);
   await require('./verify-paseo-quit.cjs').verifyPaseoQuit(source);
+  require('./verify-paseo-versions.cjs').verifyPaseoVersions(source);
   if (process.env.CLOUDE_PASEO_SKIP_INSTALL !== '1') await runNpm(['ci', '--no-audit', '--no-fund'], source);
   if (process.env.CLOUDE_PASEO_SKIP_BUILD !== '1') {
     await runNpm(['run', 'build:server:clean'], source);
