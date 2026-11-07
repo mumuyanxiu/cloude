@@ -52,7 +52,7 @@ print(json.dumps({'root':str(root),'project':str(project),'cli':str(cli),'envfil
     await new Promise((resolve, reject) => { client.once('ready', resolve); client.once('error', reject); client.connect({ host: '127.0.0.1', port: ssh.address().port, username: 'fixture', password: 'fixture-only', hostVerifier: () => true }); });
     remote.client = client; remote.sftp = {}; remote.claudePath = fixture.cli;
   }
-  async function waitState(state) { let latest; for (let i = 0; i < 30; i++) { latest = await remote.pollTask({ projectPath: fixture.project, jobId: 'ssh-task', cursor: 0 }); if (latest.task.state === state) return latest; await pause(150); } throw new Error('Task state: ' + JSON.stringify(latest.task)); }
+  async function waitState(state, jobId = 'ssh-task') { let latest; for (let i = 0; i < 30; i++) { latest = await remote.pollTask({ projectPath: fixture.project, jobId, cursor: 0 }); if (latest.task.state === state) return latest; await pause(150); } throw new Error('Task state: ' + JSON.stringify(latest.task)); }
   let echo;
   try {
     await connect();
@@ -63,6 +63,14 @@ print(json.dumps({'root':str(root),'project':str(project),'cli':str(cli),'envfil
     await remote.replyTask({ projectPath: fixture.project, jobId: 'ssh-task', requestId: 'question-1', allow: true, answers: { 'Which option?': 'B' } });
     const finished = await waitState('completed'); assert.equal(finished.events.filter(e => e.event?.type === 'result').length, 1);
     console.log('PASS actual SSH disconnect/reconnect preserves the same task and waiting question');
+    await remote.disconnect(); await connect();
+    await remote.startPersistentChat({ projectPath: fixture.project, jobId: 'ssh-followup', conversationId: 'ssh-conversation', sessionId: finished.task.sessionId, prompt: 'second turn', mode: 'edit' });
+    const followup = await waitState('completed', 'ssh-followup');
+    assert.equal(followup.task.processReused, true);
+    assert.equal(followup.task.pid, finished.task.pid);
+    assert.deepEqual(followup.events.filter(e => e.event?.type === 'assistant').map(e => e.event.fixture_prompt), ['second turn']);
+    assert.deepEqual((await remote.pollTask({ projectPath: fixture.project, jobId: 'ssh-task', cursor: finished.cursor })).events, []);
+    console.log('PASS completed session reuses the same Claude process after SSH reconnect without replaying the first prompt');
     await remote.openTerminal({ jobId: 'shell', projectPath: fixture.project, cols: 80, rows: 24 });
     await remote.writeJob('shell', 'export CLOUDE_FIXTURE_VALUE=retained; cd ..\n');
     await pause(200);
@@ -78,9 +86,13 @@ print(json.dumps({'root':str(root),'project':str(project),'cli':str(cli),'envfil
     console.log('PASS actual SSH direct-tcpip forwards bytes through a loopback-only port');
   } finally {
     await remote.disconnect(); for (const peer of peers) peer.end(); for (const child of children) child.kill(); ssh.close(); echo?.close();
-    python(`import pathlib,shutil
+    python(`import pathlib,shutil,json,time
 root=pathlib.Path(${JSON.stringify(fixture.root)})
 assert root.parent==pathlib.Path('/tmp') and root.name.startswith('cloude-ssh-test-')
+workers=list((root/'.cloude-tasks').glob('*/*/worker.json'))
+for p in workers: p.with_name('retire').touch()
+deadline=time.monotonic()+8
+while time.monotonic()<deadline and any(json.loads(p.read_text())['state']!='closed' for p in workers): time.sleep(0.1)
 shutil.rmtree(root)`);
   }
 }

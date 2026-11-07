@@ -4,6 +4,19 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+// Keep the SSH exec request small. Sending a shell-quoted copy of the runner
+// can exceed SSH servers' command limits as the supervisor grows. Both source
+// and task data travel through stdin; only this fixed loader is shell code.
+const TASK_LOADER = `import json,sys
+try:
+ data=json.loads(sys.stdin.buffer.read(2*1024*1024))
+ scope={'__name__':'cloude_task'}
+ exec(compile(data['runnerSource'],'cloude-task-runner','exec'),scope)
+ print(json.dumps(scope['dispatch'](data),ensure_ascii=False))
+except Exception as error:
+ print(json.dumps({'error':str(error)},ensure_ascii=False))
+ sys.exit(1)`;
+
 const MEDIA_LIMIT = 20 * 1024 * 1024;
 function imageMime(bytes) {
   if (bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
@@ -103,7 +116,7 @@ function installRemoteFeatures(RemoteClient, shellQuote, inferenceOptions) {
       const directory = await this._directory(projectPath);
       const helper = await fs.readFile(path.join(__dirname, 'task-runner.py'), 'utf8');
       // A poll normally holds 1 MB, but may return one complete 16 MB event.
-      const result = await this._execCapture(`python3 -c ${shellQuote(helper)}`, { input: JSON.stringify({ ...data, ...(action === 'start' ? { runnerSource: helper } : {}), projectPath: directory, action }), maxBytes: 32 * 1024 * 1024, timeout: 30000 });
+      const result = await this._execCapture(`python3 -c ${shellQuote(TASK_LOADER)}`, { input: JSON.stringify({ ...data, runnerSource: helper, projectPath: directory, action }), maxBytes: 32 * 1024 * 1024, timeout: 30000 });
       let answer;
       try { answer = JSON.parse(result.stdout); } catch { throw new Error(`任务服务不可用，请确认远端有 Python 3：${result.stderr.slice(0, 500)}`); }
       if (result.code !== 0 || answer.error) throw new Error(answer.error || '远端任务操作失败');

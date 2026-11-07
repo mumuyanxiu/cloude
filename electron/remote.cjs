@@ -11,6 +11,8 @@ const { pipeline } = require('node:stream/promises');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { parseUsageOutput, supportsUsageVersion, unavailable } = require('./usage.cjs');
 const { inspectLocalPath, localVersion, sameLocalVersion, sameRemoteVersion } = require('./uploads.cjs');
+const { assertPrivateKeyPath } = require('./key-path.cjs');
+const { modelListCommand, queryModels } = require('./models.cjs');
 
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const MAX_COMMAND_BYTES = 512 * 1024;
@@ -164,6 +166,7 @@ class RemoteClient {
     const port = Number(config.port || 22);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SSH 端口必须介于 1 和 65535。');
     if (!['key', 'password', 'agent'].includes(config.authType)) throw new Error('请选择有效的认证方式。');
+    const keyPath = config.authType === 'key' ? assertPrivateKeyPath(config.privateKeyPath) : null;
     const requestedRoot = assertString(config.workspace || '~/claude-workspace', '工作目录', 4096);
     const executable = assertString(config.claudePath || 'claude', 'Claude 可执行文件', 4096);
     await this.disconnect();
@@ -183,10 +186,15 @@ class RemoteClient {
     try {
       if (config.authType === 'password') options.password = assertString(config.password, '密码', 16384);
       else if (config.authType === 'key') {
-        const keyPath = assertString(config.privateKeyPath, '私钥路径', 8192);
-        const stat = await fsp.stat(keyPath);
-        if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error('私钥文件无效或过大。');
-        options.privateKey = await fsp.readFile(keyPath);
+        try {
+          const stat = await fsp.stat(keyPath);
+          if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error('私钥文件无效或过大。');
+          options.privateKey = await fsp.readFile(keyPath);
+        } catch (error) {
+          if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new Error('找不到私钥文件，请点击“选择”重新选择本机私钥文件。');
+          if (error.code === 'EACCES' || error.code === 'EPERM') throw new Error('无法读取私钥文件，请检查文件访问权限。');
+          throw new Error('无法读取私钥文件，请选择不超过 1 MB 的有效私钥文件。');
+        }
         if (config.passphrase) options.passphrase = String(config.passphrase);
       } else options.agent = process.env.SSH_AUTH_SOCK || (process.platform === 'win32' ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
       if (config.authType === 'agent' && !options.agent) throw new Error('未找到 SSH Agent，请选择私钥文件或密码认证。');
@@ -600,6 +608,19 @@ class RemoteClient {
     return { isGit: result.code === 0, diff: result.code === 0 ? result.stdout : '' };
   }
 
+  async getModels(projectPath) {
+    this._connected();
+    const client = this.client; const generation = this.generation;
+    const assertCurrent = () => {
+      this._assertContext();
+      if (this.client !== client || this.generation !== generation) throw new Error('连接已变化，请刷新模型列表。');
+    };
+    const directory = projectPath ? await this._directory(projectPath) : this.workspace;
+    assertCurrent();
+    const command = modelListCommand(this.claudePath, directory, shellQuote);
+    return queryModels(client, 'bash -lc ' + shellQuote(command), { assertCurrent });
+  }
+
   async getUsage() {
     this._connected();
     const generation = this.generation;
@@ -704,7 +725,7 @@ class RemoteClient {
 // Every public asynchronous operation stays bound to the connection it began on.
 require('./remote-features.cjs').installRemoteFeatures(RemoteClient, shellQuote, inferenceOptions);
 // This also protects library callers independently of the desktop's busy-operation UI.
-for (const method of ['readMedia', 'searchFiles', 'openTerminal', 'forwardPort', 'taskRequest', 'listTasks', 'pollTask', 'replyTask', 'stopTask', 'startPersistentChat', 'openProject', 'listSessions', 'readSession', 'resolvePath', 'listFiles', 'readFile', 'saveFile', 'mkdir', 'inspectUploadPath', 'mkdirUploadDirectory', 'download', 'upload', 'getDiff', 'getUsage', 'startChat', 'runCommand']) {
+for (const method of ['readMedia', 'searchFiles', 'openTerminal', 'forwardPort', 'taskRequest', 'listTasks', 'pollTask', 'replyTask', 'stopTask', 'startPersistentChat', 'openProject', 'listSessions', 'readSession', 'resolvePath', 'listFiles', 'readFile', 'saveFile', 'mkdir', 'inspectUploadPath', 'mkdirUploadDirectory', 'download', 'upload', 'getDiff', 'getUsage', 'getModels', 'startChat', 'runCommand']) {
   const implementation = RemoteClient.prototype[method];
   RemoteClient.prototype[method] = function (...args) {
     if (this.operationContext.getStore()) return implementation.apply(this, args);

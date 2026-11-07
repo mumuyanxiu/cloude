@@ -14,6 +14,45 @@ const { createUploadPlan, executeUploadPlan } = require('../electron/uploads.cjs
 
 const { LocalSftp } = require('./helpers/local-sftp.cjs');
 
+test('pasted private keys fail before filesystem or connection changes without exposing their contents', async t => {
+  const remote = new RemoteClient({ clientFactory: () => { throw new Error('must not create SSH client'); } });
+  let disconnects = 0;
+  remote.disconnect = async () => { disconnects++; };
+  t.mock.method(fsp, 'stat', async () => { throw new Error('must not inspect a pasted key as a path'); });
+  const marker = kind => ['-----BEGIN', kind, 'PRIVATE KEY-----'].filter(Boolean).join(' ');
+  const secret = 'synthetic-key-body-never-log';
+  for (const input of [
+    `${marker('OPENSSH')}\n${secret}\n-----END OPENSSH PRIVATE KEY-----`,
+    `${marker('RSA')} ${secret}`,
+    `${marker('EC')}\r\n${secret}`,
+    `${marker('ENCRYPTED')} ${secret}`,
+    `${marker('')} ${secret}`,
+    `PuTTY-User-Key-File-3: ssh-ed25519\n${secret}`,
+    `b3BlbnNzaC1rZXktdjE${secret}`,
+  ]) {
+    await assert.rejects(remote.connect({ host: 'fixture', username: 'tester', authType: 'key', privateKeyPath: input }), error => {
+      assert.match(error.message, /需要私钥文件路径/);
+      assert.ok(!error.message.includes(secret));
+      return true;
+    });
+  }
+  assert.equal(disconnects, 0);
+  assert.equal(fsp.stat.mock.callCount(), 0);
+});
+
+test('missing private key file reports a recoverable error without echoing its input', async t => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'workspace-missing-key-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  const remote = new RemoteClient();
+  await assert.rejects(remote.connect({ host: 'fixture', username: 'tester', authType: 'key', privateKeyPath: path.join(dir, 'missing') }), error => {
+    assert.match(error.message, /找不到私钥文件/);
+    assert.ok(!error.message.includes(dir));
+    return true;
+  });
+  assert.equal(remote.connecting, false);
+  assert.equal(remote.client, null);
+});
+
 async function fixture(t) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'workspace-remote-test-'));
   t.after(async () => { if (path.basename(root).startsWith('workspace-remote-test-')) await fsp.rm(root, { recursive: true, force: true }); });
@@ -218,12 +257,19 @@ test('disconnect clears a pending job reservation and a late exec cannot start i
 
 // This server exercises the real ssh2 handshake and SFTP wire protocol on loopback.
 // It does not contact 远程设备 and does not execute any real shell command.
-async function startProtocolServer(t, adapter) {
+async function startProtocolServer(t, adapter, allowedKey = null) {
   const privateKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' });
-  const connections = new Set(); const seen = { prompts: [], commands: [] };
+  const connections = new Set(); const seen = { prompts: [], commands: [], modelRequests: [] };
   const server = new Server({ hostKeys: [privateKey] }, client => {
     connections.add(client); client.on('error', () => {}); client.on('close', () => connections.delete(client));
-    client.on('authentication', ctx => ctx.method === 'password' && ctx.username === 'tester' && ctx.password === 'test-only' ? ctx.accept() : ctx.reject());
+    client.on('authentication', ctx => {
+      if (ctx.username !== 'tester') return ctx.reject();
+      if (ctx.method === 'password' && ctx.password === 'test-only') return ctx.accept();
+      if (ctx.method === 'publickey' && allowedKey && ctx.key.algo === allowedKey.type
+          && ctx.key.data.equals(allowedKey.getPublicSSH())
+          && (!ctx.signature || allowedKey.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true)) return ctx.accept();
+      ctx.reject();
+    });
     client.on('ready', () => client.on('session', accept => {
       const session = accept();
       session.on('sftp', acceptSftp => {
@@ -251,6 +297,16 @@ async function startProtocolServer(t, adapter) {
       session.on('exec', (acceptExec, reject, info) => {
         const stream = acceptExec(); seen.commands.push(info.command);
         if (info.command.includes('--version')) { stream.exit(0); stream.end('local-test\n2.1.test\n'); return; }
+        if (info.command.includes('--no-session-persistence') && info.command.includes('--input-format')) {
+          let buffer = '';
+          stream.on('data', chunk => {
+            buffer += chunk.toString('utf8');
+            if (!buffer.includes('\n')) return;
+            const request = JSON.parse(buffer.trim()); seen.modelRequests.push(request); buffer = '';
+            stream.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { models: [{ value: 'fable', displayName: 'Fable fixture', description: 'Protocol fixture' }] } } }) + '\n');
+          });
+          return;
+        }
         const chunks = [];
         stream.on('data', chunk => chunks.push(chunk));
         stream.on('end', () => {
@@ -289,6 +345,33 @@ test('real loopback SSH verifies host key, downloads via SFTP and streams a Clau
   assert.equal(events.find(event => event.event?.type === 'result').event.result, '本地协议测试完成');
   assert.equal(events.find(event => event.type === 'exit').code, 0);
   await remote.disconnect();
+});
+
+test('model discovery performs only the initialize handshake over real loopback SSH', async t => {
+  const { sftp } = await fixture(t);
+  const { port, seen } = await startProtocolServer(t, sftp);
+  const remote = new RemoteClient({ verifyHost: async () => true });
+  t.after(() => remote.disconnect());
+  await remote.connect({ host: '127.0.0.1', port, username: 'tester', authType: 'password', password: 'test-only', workspace: '~/work' });
+  const result = await remote.getModels('/home/tester/work');
+  assert.equal(result.models[0].value, 'fable');
+  assert.equal(seen.modelRequests.length, 1);
+  assert.equal(seen.modelRequests[0].request.subtype, 'initialize');
+  assert.deepEqual(seen.prompts, []);
+});
+
+test('a selected private key file still authenticates over real loopback SSH', async t => {
+  const { root, sftp } = await fixture(t);
+  const key = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' });
+  const keyPath = path.join(root, 'selected private key');
+  await fsp.writeFile(keyPath, key);
+  const { port } = await startProtocolServer(t, sftp, utils.parseKey(key));
+  const remote = new RemoteClient({ verifyHost: async () => true });
+  t.after(() => remote.disconnect());
+  const info = await remote.connect({ host: '127.0.0.1', port, username: 'tester', authType: 'key', privateKeyPath: keyPath, workspace: '~/work' });
+  assert.equal(info.hostname, 'local-test');
+  assert.equal(info.claudeAvailable, true);
+  assert.equal(await fsp.readFile(keyPath, 'utf8'), key);
 });
 
 test('untrusted SSH host is rejected before any workspace or execution operation', async t => {

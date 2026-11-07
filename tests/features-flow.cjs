@@ -32,6 +32,7 @@ async function run() {
   main.remote.connect = async () => { main.remote.client = {}; main.remote.sftp = sftp; main.remote.home = '/home/tester'; main.remote.workspace = '/home/tester/work'; main.remote.workspaceInput = '/home/tester/work'; return { home: '/home/tester', workspace: '/home/tester/work', hostname: 'fixture', claudeAvailable: true }; };
   main.remote.disconnect = async () => { main.remote._emit({ kind: 'connection', status: 'disconnected' }); };
   main.remote.listSessions = async () => ({ sessions: [] });
+  main.remote.getModels = async () => ({ models: ['sonnet', 'opus', 'fable'].map(value => ({ value, displayName: value, description: 'Fixture model', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] })), fetchedAt: Date.now() });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now() });
   const calls = { chat: [], terminal: [], resize: [], input: [], external: [], opened: [], replies: [], stops: [] };
   main.remote.startChat = async options => { calls.chat.push(options); setTimeout(() => { main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'event', event: { type: 'result', subtype: 'success', result: '已查看图片。', session_id: 'fixture-session' } }); main.remote._emit({ kind: 'chat', jobId: options.jobId, type: 'exit', code: 0 }); }, 50); return { jobId: options.jobId }; };

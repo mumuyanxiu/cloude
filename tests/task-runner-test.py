@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 SOURCE = (Path(__file__).resolve().parents[1] / 'electron/task-runner.py').read_text(encoding='utf-8')
 FAKE = '''#!/usr/bin/env python3
@@ -14,6 +15,8 @@ def send(value):
     print(json.dumps(value), flush=True)
 init = json.loads(sys.stdin.readline())
 assert init['request']['subtype'] == 'initialize'
+send({'type':'control_response','response':{'subtype':'success','request_id':init['request_id'],'response':{}}})
+# Duplicate acknowledgements must never submit a second user turn.
 send({'type':'control_response','response':{'subtype':'success','request_id':init['request_id'],'response':{}}})
 user = json.loads(sys.stdin.readline())
 prompt = user['message']['content']
@@ -37,10 +40,20 @@ if prompt == 'image':
 if prompt == 'long-text':
     send({'type':'assistant','message':{'content':[{'type':'text','text':'large text: ' + 'X' * (5 * 1024 * 1024)}]}})
 time.sleep(0.25)
-send({'type':'assistant','message':{'content':[{'type':'text','text':'fixture complete'}]}})
+send({'type':'assistant','message':{'content':[{'type':'text','text':'fixture complete'}]},'fixture_pid':os.getpid(),'fixture_prompt':prompt})
 send({'type':'result','subtype':'success','session_id':'fixture-session','result':'fixture complete'})
 for line in sys.stdin:
-    pass
+    user = json.loads(line)
+    assert user['type'] == 'user' and user['session_id'] == 'fixture-session'
+    prompt = user['message']['content']
+    if prompt == 'wait':
+        time.sleep(60)
+    if prompt == 'question':
+        send({'type':'control_request','request_id':'followup-question','request':{'subtype':'can_use_tool','tool_name':'AskUserQuestion','input':{'questions':[{'question':'Continue?'}]}}})
+        answer = json.loads(sys.stdin.readline())
+        assert answer['response']['response']['updatedInput']['answers']['Continue?'] == 'yes'
+    send({'type':'assistant','message':{'content':[{'type':'text','text':'followup complete'}]},'fixture_pid':os.getpid(),'fixture_prompt':prompt})
+    send({'type':'result','subtype':'success','session_id':'fixture-session','result':'followup complete'})
 '''
 
 
@@ -60,7 +73,13 @@ class Tasks(unittest.TestCase):
     def tearDown(self):
         for job in self.jobs:
             self.request('stop', job)
-        time.sleep(0.3)
+        for p in (self.root / '.cloude-tasks').glob('*/*/worker.json'):
+            p.with_name('retire').touch()
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if all(json.loads(p.read_text()).get('state') == 'closed' for p in (self.root / '.cloude-tasks').glob('*/*/worker.json')):
+                break
+            time.sleep(0.1)
         self.temp.cleanup()
 
     def request(self, action, job='job', **extra):
@@ -71,10 +90,99 @@ class Tasks(unittest.TestCase):
             raise ValueError(value['error'])
         return value
 
-    def start(self, prompt, job='job'):
+    def start(self, prompt, job='job', **extra):
         self.jobs.append(job)
+        conversation = extra.pop('conversationId', 'conversation')
         return self.request('start', job, prompt=prompt, executable=str(self.cli), mode='edit', allowCommands=False, askCommands=True,
-                            conversationId='conversation', title=prompt, runnerSource=SOURCE)
+                            conversationId=conversation, title=prompt, runnerSource=SOURCE, **extra)
+
+    def assistant(self, result):
+        return [e['event'] for e in result['events'] if e.get('event', {}).get('type') == 'assistant']
+
+    def test_followup_reuses_one_cli_and_separates_per_turn_logs(self):
+        self.start('first')
+        first = self.wait_state('completed')
+        before = self.request('poll', cursor=first['cursor'])
+        self.assertEqual(before['events'], [])
+        next_task = self.start('second', 'next', sessionId='fixture-session')
+        self.assertTrue(next_task['task']['processReused'])
+        second = self.wait_state('completed', 'next')
+        self.assertEqual(self.assistant(first)[0]['fixture_pid'], self.assistant(second)[0]['fixture_pid'])
+        self.assertEqual([e['fixture_prompt'] for e in self.assistant(first)], ['first'])
+        self.assertEqual([e['fixture_prompt'] for e in self.assistant(second)], ['second'])
+        self.assertEqual(self.request('poll', cursor=first['cursor'])['events'], [])
+        self.assertTrue(self.start('duplicate', 'next', sessionId='fixture-session')['existing'])
+        self.assertEqual(len(self.assistant(self.request('poll', 'next'))), 1)
+
+    def test_reused_process_keeps_question_and_stop_bound_to_the_current_turn(self):
+        self.start('first')
+        first = self.wait_state('completed')
+        self.start('question', 'question', sessionId='fixture-session')
+        self.wait_state('waiting', 'question')
+        self.request('stop', 'job')  # A finished job cannot stop a later turn.
+        self.request('reply', 'question', requestId='followup-question', allow=True, answers={'Continue?': 'yes'})
+        self.wait_state('completed', 'question')
+        self.start('wait', 'waiting', sessionId='fixture-session')
+        self.wait_state('running', 'waiting')
+        self.request('stop', 'waiting')
+        self.wait_state('stopped', 'waiting')
+        self.assertEqual(self.request('poll')['task']['state'], 'completed')
+
+    def test_changed_options_retire_old_worker_and_cannot_reuse_stale_history(self):
+        self.start('first')
+        first = self.wait_state('completed')
+        self.start('second', 'next', sessionId='fixture-session', model='sonnet')
+        second = self.wait_state('completed', 'next')
+        self.assertFalse(second['task']['processReused'])
+        self.assertNotEqual(self.assistant(first)[0]['fixture_pid'], self.assistant(second)[0]['fixture_pid'])
+        self.start('third', 'third', sessionId='fixture-session')
+        third = self.wait_state('completed', 'third')
+        self.assertFalse(third['task']['processReused'])
+        self.assertNotEqual(self.assistant(first)[0]['fixture_pid'], self.assistant(third)[0]['fixture_pid'])
+
+    def test_dead_idle_worker_falls_back_to_resume_without_replaying_old_prompt(self):
+        self.start('first')
+        first = self.wait_state('completed')
+        for p in (self.root / '.cloude-tasks').glob('*/*/worker.json'):
+            p.with_name('retire').touch()
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if all(json.loads(p.read_text())['state'] == 'closed' for p in (self.root / '.cloude-tasks').glob('*/*/worker.json')):
+                break
+            time.sleep(0.1)
+        self.start('second', 'next', sessionId='fixture-session')
+        second = self.wait_state('completed', 'next')
+        self.assertFalse(second['task']['processReused'])
+        self.assertEqual([e['fixture_prompt'] for e in self.assistant(second)], ['second'])
+
+    def test_concurrent_clients_cannot_submit_two_turns_to_one_session(self):
+        self.start('first')
+        self.wait_state('completed')
+        def send(job):
+            try:
+                return self.start('wait', job, sessionId='fixture-session')
+            except ValueError as error:
+                return str(error)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(send, ['next-a', 'next-b']))
+        self.assertEqual(sum(isinstance(r, dict) for r in results), 1)
+        self.assertTrue(any(isinstance(r, str) and '仍在执行' in r for r in results))
+        # Only successfully created jobs can be stopped during cleanup.
+        self.jobs = [job for job in self.jobs if any(p.parent.name == job for p in (self.root / '.cloude-tasks').glob('*/*/status.json'))]
+
+    def test_idle_workers_are_bounded_when_new_conversations_start(self):
+        for index in range(6):
+            job = 'idle-%s' % index
+            self.start('complete', job, conversationId=job)
+            self.wait_state('completed', job)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            states = [json.loads(p.read_text())['state'] for p in (self.root / '.cloude-tasks').glob('*/*/worker.json')]
+            if states.count('idle') <= 4 and states.count('closed') >= 2:
+                break
+            time.sleep(0.1)
+        self.assertLessEqual(states.count('idle'), 4)
+        self.assertGreaterEqual(states.count('closed'), 2)
 
     def wait_state(self, state, job='job'):
         deadline = time.monotonic() + 8

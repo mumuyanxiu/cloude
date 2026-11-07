@@ -57,6 +57,7 @@ test('task prompts travel on stdin and helper code is fixed, even with shell cha
   remote._execCapture = async (command, options) => { captured = { command, options }; return { code: 0, stdout: '{"jobId":"fixture"}' }; };
   await remote.startPersistentChat({ projectPath: '/project', jobId: 'fixture', conversationId: 'conversation', prompt: 'literal $(touch forbidden) secret', mode: 'edit' });
   assert.doesNotMatch(captured.command, /literal \$\(touch forbidden\) secret/);
+  assert.ok(Buffer.byteLength(captured.command) < 2048, 'SSH exec carries only a fixed loader, not the entire supervisor');
   assert.equal(JSON.parse(captured.options.input).prompt, 'literal $(touch forbidden) secret');
   assert.match(JSON.parse(captured.options.input).runnerSource, /Per-task Claude/);
   assert.equal(JSON.parse(captured.options.input).allowCommands, undefined);

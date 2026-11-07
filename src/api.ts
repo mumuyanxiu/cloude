@@ -12,7 +12,7 @@ export const api: DesktopAPI = window.workspace ?? {
   loadState: async () => emptyState, saveState: async () => {}, onEvent: () => () => {},
   getUpdateState: async () => ({ status: 'unsupported', currentVersion: '', version: null, percent: 0, message: '' }),
   checkForUpdates: desktopOnly, downloadUpdate: desktopOnly, installUpdate: desktopOnly, openReleases: desktopOnly,
-  pickPrivateKey: desktopOnly, connect: desktopOnly, disconnect: desktopOnly, getUsage: desktopOnly,
+  pickPrivateKey: desktopOnly, connect: desktopOnly, disconnect: desktopOnly, getUsage: desktopOnly, getModels: desktopOnly,
   openProject: desktopOnly, listSessions: desktopOnly, readSession: desktopOnly,
   listFiles: desktopOnly, readFile: desktopOnly, saveFile: desktopOnly, mkdir: desktopOnly,
   download: desktopOnly, upload: desktopOnly, startChat: desktopOnly, runCommand: desktopOnly,

@@ -1,5 +1,6 @@
 """Per-task Claude process supervisor. No network listener or privileged service."""
 import hashlib
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,39 @@ MAX_LOG = 32 * 1024 * 1024
 MAX_OUTPUT_LINE = 64 * 1024 * 1024
 MAX_EVENT_LINE = 16 * 1024 * 1024
 POLL_BYTES = 1024 * 1024
+# Keep the CLI's in-memory conversation, project context and tool catalog between
+# user turns, as the official interactive client does. Idle means no model calls.
+IDLE_SECONDS = 60 * 60
+
+
+@contextmanager
+def file_lock(target):
+    if target.is_symlink():
+        raise ValueError('任务锁不能是符号链接')
+    with open(target, 'a+b') as stream:
+        os.chmod(target, 0o600)
+        if os.name == 'posix':
+            import fcntl
+            fcntl.flock(stream, fcntl.LOCK_EX)
+        else:  # Portable protocol tests; remote dispatch still requires POSIX.
+            import msvcrt
+            stream.write(b'\0')
+            stream.flush()
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            if os.name == 'posix':
+                fcntl.flock(stream, fcntl.LOCK_UN)
+            else:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def runtime_key(config):
+    return {key: config.get(key) or '' for key in
+            ('projectPath', 'executable', 'mode', 'model', 'effort', 'runnerVersion')}
 
 
 def display_event(value):
@@ -195,6 +229,7 @@ def permission_response(tool, data):
 
 
 def worker(folder):
+    owner = folder
     config = read_json(folder / 'config.json')
     status = read_json(folder / 'status.json')
     status.update(state='running', pid=os.getpid(), processStamp=process_stamp(os.getpid()), pendingRequests=[])
@@ -204,6 +239,15 @@ def worker(folder):
     pending = {}
     stopped = False
     result_seen = False
+    idle_since = None
+    runtime = {'pid': os.getpid(), 'processStamp': process_stamp(os.getpid()),
+               'key': runtime_key(config), 'state': 'busy', 'sessionId': config.get('sessionId'),
+               'activeJob': folder.name}
+
+    def publish_runtime(state):
+        runtime.update(state=state, sessionId=status.get('sessionId'), activeJob=folder.name,
+                       updatedAt=int(time.time() * 1000))
+        atomic_json(owner / 'worker.json', runtime)
 
     def save():
         status['updatedAt'] = int(time.time() * 1000)
@@ -221,6 +265,8 @@ def worker(folder):
         child.stdin.flush()
 
     try:
+        with file_lock(owner / 'worker.lock'):
+            publish_runtime('busy')
         args = claude_args(config)
         env = dict(os.environ)
         env['PATH'] = str(Path.home() / '.local/bin') + ':' + env.get('PATH', '')
@@ -238,9 +284,41 @@ def worker(folder):
         initialized = False
         deadline = time.monotonic() + 60
         streams_closed = 0
-        finished_at = None
         while True:
-            if (folder / 'stop').exists():
+            if result_seen:
+                # Dispatch and idle exit share this lock: a turn is either
+                # accepted by this live worker or launched with --resume.
+                with file_lock(owner / 'worker.lock'):
+                    next_path = owner / 'next.json'
+                    if next_path.exists():
+                        next_id = valid_id(read_json(next_path)['jobId'])
+                        next_folder = owner.parent / next_id
+                        next_config = read_json(next_folder / 'config.json')
+                        if runtime_key(next_config) != runtime['key'] or next_config.get('sessionId') != status.get('sessionId'):
+                            raise ValueError('后续消息的会话或运行配置不匹配')
+                        event_file.close()
+                        folder, config = next_folder, next_config
+                        status = read_json(folder / 'status.json')
+                        status.update(state='running', pid=os.getpid(), processStamp=runtime['processStamp'], pendingRequests=[])
+                        event_file = open(folder / 'events.jsonl', 'ab', buffering=0)
+                        result_seen = False
+                        idle_since = None
+                        publish_runtime('busy')
+                        next_path.unlink()
+                        save()
+                        if not (folder / 'stop').exists():
+                            write({'type': 'user', 'message': {'role': 'user', 'content': config['prompt']},
+                                   'parent_tool_use_id': None, 'session_id': status['sessionId']})
+                    elif ((owner / 'retire').exists() or status['state'] != 'completed' or
+                          not status.get('sessionId') or time.monotonic() - idle_since >= IDLE_SECONDS):
+                        publish_runtime('closed')
+                        child.stdin.close()
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            terminate(child)
+                        break
+            if not result_seen and (folder / 'stop').exists():
                 stopped = True
                 terminate(child)
                 break
@@ -260,9 +338,6 @@ def worker(folder):
                     raise ValueError('Claude 未响应交互协议，请更新远端 Claude Code 后重试')
                 if child.poll() is not None and streams_closed >= 2:
                     break
-                if finished_at and time.monotonic() - finished_at > 10:
-                    terminate(child)
-                    break
                 continue
             if line is None:
                 streams_closed += 1
@@ -280,8 +355,8 @@ def worker(folder):
                 continue
             if event.get('type') == 'control_response':
                 reply = event.get('response', {})
-                if reply.get('request_id') == init_id:
-                    if reply.get('subtype') == 'error':
+                if reply.get('request_id') == init_id and not initialized:
+                    if reply.get('subtype') != 'success':
                         raise ValueError(reply.get('error', '交互协议初始化失败'))
                     initialized = True
                     write({'type': 'user', 'message': {'role': 'user', 'content': config['prompt']}, 'parent_tool_use_id': None, 'session_id': config.get('sessionId', '')})
@@ -306,8 +381,10 @@ def worker(folder):
             if event.get('type') == 'result':
                 result_seen = True
                 status['state'] = 'failed' if event.get('is_error') or event.get('subtype', 'success') != 'success' else 'completed'
-                finished_at = time.monotonic()
-                child.stdin.close()
+                idle_since = time.monotonic()
+                pending.clear()
+                with file_lock(owner / 'worker.lock'):
+                    publish_runtime('idle' if status['state'] == 'completed' else 'closed')
                 save()
         code = child.wait(timeout=5)
         if stopped:
@@ -316,13 +393,90 @@ def worker(folder):
             status.update(state='failed', message='Claude 已退出，未收到完整结果，请查看任务输出')
         status['exitCode'] = code
     except Exception as error:
-        status.update(state='failed', message=str(error))
+        if not result_seen:
+            status.update(state='failed', message=str(error))
         if child:
             terminate(child)
     finally:
+        with file_lock(owner / 'worker.lock'):
+            publish_runtime('closed')
+            next_path = owner / 'next.json'
+            if next_path.exists():
+                queued = owner.parent / valid_id(read_json(next_path)['jobId'])
+                queued_status = read_json(queued / 'status.json')
+                queued_status.update(state='interrupted', message='会话进程已退出，消息未自动重发，请从原会话继续。', pendingRequests=[])
+                atomic_json(queued / 'status.json', queued_status)
         pending.clear()
         save()
         event_file.close()
+
+
+def reuse_worker(root, folder, config, status, active_count=0):
+    idle = []
+    for candidate in root.iterdir():
+        if not candidate.is_dir() or candidate.is_symlink() or not (candidate / 'worker.json').is_file():
+            continue
+        with file_lock(candidate / 'worker.lock'):
+            runtime = read_json(candidate / 'worker.json')
+            if runtime.get('state') != 'idle' or not is_alive(runtime):
+                continue
+            if config.get('sessionId') and runtime.get('sessionId') == config['sessionId']:
+                if runtime.get('key') == runtime_key(config) and not (candidate / 'retire').exists():
+                    # Status identifies the accepting supervisor even before it
+                    # picks up the mailbox, so a crash is visible as interrupted.
+                    status.update(pid=runtime['pid'], processStamp=runtime.get('processStamp'), processReused=True)
+                    atomic_json(folder / 'status.json', status)
+                    atomic_json(candidate / 'next.json', {'jobId': folder.name})
+                    runtime['state'] = 'queued'
+                    atomic_json(candidate / 'worker.json', runtime)
+                    return True
+                # A model/effort/mode/version change must not leave an older
+                # process eligible to accept later turns with stale history.
+                (candidate / 'retire').touch(mode=0o600, exist_ok=True)
+            else:
+                idle.append((runtime.get('updatedAt', 0), candidate))
+    # Bound idle memory use. Never interrupt a worker with an accepted turn.
+    excess = max(0, len(idle) - max(0, 3 - active_count))
+    for _, candidate in sorted(idle)[:excess]:
+        with file_lock(candidate / 'worker.lock'):
+            if read_json(candidate / 'worker.json').get('state') == 'idle':
+                (candidate / 'retire').touch(mode=0o600, exist_ok=True)
+    return False
+
+
+def start_task(root, folder, project, data):
+    if folder.exists():
+        return {'jobId': folder.name, 'existing': True, 'task': snapshot(folder)}
+    active = [snapshot(p) for p in root.iterdir() if p.is_dir() and not p.is_symlink() and (p / 'status.json').exists()]
+    active = [s for s in active if s['state'] in ('starting', 'running', 'waiting')]
+    if len(active) >= 4:
+        raise ValueError('该项目最多运行 4 个后台任务')
+    if any((data.get('sessionId') and s.get('sessionId') == data['sessionId']) or
+           (data.get('conversationId') and s.get('conversationId') == data['conversationId']) for s in active):
+        raise ValueError('该聊天仍在执行任务，请等待完成或停止后再发送。')
+    if data.get('sessionId'):
+        valid_id(data['sessionId'])
+    config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode', 'model', 'effort']}
+    config['projectPath'] = project
+    config['runnerVersion'] = hashlib.sha256(data['runnerSource'].encode()).hexdigest()
+    claude_args(config)
+    folder.mkdir(mode=0o700)
+    (folder / 'responses').mkdir(mode=0o700)
+    now = int(time.time() * 1000)
+    status = {'jobId': folder.name, 'conversationId': data.get('conversationId', ''), 'projectPath': project,
+              'title': data.get('title', '')[:80], 'state': 'starting', 'createdAt': now, 'updatedAt': now,
+              'sessionId': data.get('sessionId'), 'pendingRequests': [], 'processReused': False}
+    atomic_json(folder / 'config.json', config)
+    atomic_json(folder / 'status.json', status)
+    if reuse_worker(root, folder, config, status, len(active)):
+        return {'jobId': folder.name, 'task': status}
+    script = folder / 'runner.py'
+    with open(script, 'x', encoding='utf-8') as stream:
+        stream.write(data['runnerSource'])
+    os.chmod(script, 0o600)
+    subprocess.Popen([sys.executable, str(script), '--worker', str(folder)], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    return {'jobId': folder.name, 'task': status}
 
 
 def dispatch(data):
@@ -346,29 +500,8 @@ def dispatch(data):
     if folder.is_symlink():
         raise ValueError('任务目录无效')
     if action == 'start':
-        if folder.exists():
-            return {'jobId': job_id, 'existing': True, 'task': snapshot(folder)}
-        if len([p for p in root.iterdir() if p.is_dir() and (p / 'status.json').exists() and snapshot(p)['state'] in ('starting', 'running', 'waiting')]) >= 4:
-            raise ValueError('该项目最多运行 4 个后台任务')
-        if data.get('sessionId'):
-            valid_id(data['sessionId'])
-        folder.mkdir(mode=0o700)
-        (folder / 'responses').mkdir(mode=0o700)
-        now = int(time.time() * 1000)
-        status = {'jobId': job_id, 'conversationId': data.get('conversationId', ''), 'projectPath': project,
-                  'title': data.get('title', '')[:80], 'state': 'starting', 'createdAt': now, 'updatedAt': now,
-                  'sessionId': data.get('sessionId'), 'pendingRequests': []}
-        config = {key: data.get(key) for key in ['executable', 'projectPath', 'prompt', 'sessionId', 'mode', 'model', 'effort']}
-        config['projectPath'] = project
-        atomic_json(folder / 'config.json', config)
-        atomic_json(folder / 'status.json', status)
-        script = folder / 'runner.py'
-        with open(script, 'x', encoding='utf-8') as stream:
-            stream.write(data['runnerSource'])
-        os.chmod(script, 0o600)
-        subprocess.Popen([sys.executable, str(script), '--worker', str(folder)], stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-        return {'jobId': job_id, 'task': status}
+        with file_lock(root / '.start.lock'):
+            return start_task(root, folder, project, data)
     status = snapshot(folder)
     if status['projectPath'] != project:
         raise ValueError('任务不属于当前项目')

@@ -1,24 +1,28 @@
 {
   "name": "cloude",
-  "version": "1.1.3",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Cloude desktop workspace for remote Claude Code projects",
+  "description": "Cloude desktop workspace powered by Paseo for Claude Code and Codex",
   "repository": {
     "type": "git",
     "url": "https://github.com/mumuyanxiu/cloude.git"
   },
   "author": "Cloude contributors",
-  "main": "electron/main.cjs",
+  "main": "electron/launcher.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build:legacy && npm run build:paseo",
     "start": "electron .",
     "test": "node --test tests/*.test.cjs",
     "test:desktop": "node scripts/test-desktop.cjs",
     "package": "npm run build && electron-builder --win nsis --x64 --publish never && node scripts/release-checksums.cjs",
     "verify:privacy": "node scripts/check-privacy.cjs",
-    "verify:release": "node scripts/verify-release.cjs"
+    "verify:release": "node scripts/verify-release.cjs",
+    "build:legacy": "tsc --noEmit && vite build",
+    "build:paseo": "node scripts/prepare-paseo.cjs",
+    "start:legacy": "electron . --legacy",
+    "test:paseo": "node tests/paseo-flow.cjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",
@@ -42,6 +46,7 @@
     "@vitejs/plugin-react": "^6.0.0",
     "electron": "45.1.0",
     "electron-builder": "^26.0.12",
+    "tar": "7.5.22",
     "typescript": "^5.9.3",
     "vite": "8.3.5"
   },
@@ -55,7 +60,8 @@
       "dist/**/*",
       "electron/**/*",
       "assets/**/*",
-      "package.json"
+      "package.json",
+      "THIRD-PARTY-NOTICES.md"
     ],
     "win": {
       "target": [
@@ -79,6 +85,26 @@
         "owner": "mumuyanxiu",
         "repo": "cloude",
         "releaseType": "release"
+      }
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "runtime/paseo",
+        "to": "paseo",
+        "filter": [
+          "**/*",
+          "!**/*.map",
+          "!node_modules/**/*"
+        ]
+      },
+      {
+        "from": "runtime/paseo/node_modules",
+        "to": "paseo/node_modules",
+        "filter": [
+          "**/*",
+          "!**/*.map"
+        ]
       }
     ]
   }

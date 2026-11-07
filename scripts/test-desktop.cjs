@@ -3,7 +3,7 @@ const path = require('node:path');
 const electron = require('electron');
 const root = path.resolve(__dirname, '..');
 const checks = process.argv.slice(2);
-if (!checks.length) checks.push('electron-smoke', 'renderer-flow', 'autoconnect-flow', 'usage-flow', 'commands-flow', 'folder-upload-flow', 'features-flow', 'credentials-crossprocess', 'updates-flow', 'project-history-flow');
+if (!checks.length) checks.push('electron-smoke', 'renderer-flow', 'autoconnect-flow', 'usage-flow', 'commands-flow', 'models-flow', 'folder-upload-flow', 'features-flow', 'credentials-crossprocess', 'updates-flow', 'project-history-flow', 'workspace-restart-flow');
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
 for (const check of checks) {
   if (!/^[a-z-]+$/.test(check)) throw new Error('Invalid desktop test name');

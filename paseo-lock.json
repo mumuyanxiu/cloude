@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/getpaseo/paseo",
+  "commit": "aac228e0a8ecb01cda1d56a4f2b4c3b2f00aa167",
+  "version": "0.15.3",
+  "archive": "https://codeload.github.com/getpaseo/paseo/tar.gz/aac228e0a8ecb01cda1d56a4f2b4c3b2f00aa167",
+  "sha256": "8dabab35e1d120ba8dd059fd2fbc51c29fe4efe1e4f1bb615d70ff71bf2e57dd",
+  "license": "Apache-2.0"
+}

@@ -1,6 +1,6 @@
 # Windows 发布流程
 
-当前版本为 **1.1.3**，应用更新源由 `package.json` 的 `build.publish` 指定，发布说明取自 `CHANGELOG.md`。
+当前版本为 **2.0.0**，应用更新源由 `package.json` 的 `build.publish` 指定，发布说明取自 `CHANGELOG.md`。新工作台使用固定版本的完整 Paseo Electron 客户端与 daemon。
 
 ## 本地构建
 
@@ -9,6 +9,9 @@ npm ci
 npm run verify:privacy
 npm test
 npm run package
+npm run test:desktop
+npm run test:paseo
+npm run verify:release
 ```
 
 产物位于 `release/<版本>/`，包含 `Cloude-Setup-<版本>.exe`、对应的 `.blockmap`、`latest.yml` 和 `SHA256SUMS.txt`。应用使用 electron-updater 读取 `latest.yml`，按元数据校验 SHA512，并使用块映射进行差分下载。差分不可用时下载完整安装包。PowerShell 脚本使用 SHA256 清单校验完整安装包。
@@ -17,10 +20,10 @@ npm run package
 
 ## GitHub Actions
 
-1. 确认 `package.json` 和 `package-lock.json` 的版本一致。当前版本使用 `1.1.3`，后续发布递增版本号。
+1. 确认 `package.json` 和 `package-lock.json` 的版本一致。当前版本使用 `2.0.0`。核对 `paseo-lock.json` 和 Paseo 运行时依赖锁文件。
 2. 完成源码审查和隐私检查，提交更改。
-3. 推送同版本标签，例如 `v1.1.3`。
-4. `Windows release` 工作流运行 Linux 后台任务测试、Windows 单元测试、桌面集成测试及打包验证。
+3. 推送同版本标签，例如 `v2.0.0`。
+4. `Windows release` 工作流运行 Linux 后台任务测试、Windows 单元测试、新旧工作台桌面集成测试及打包验证。构建脚本获取固定 Paseo 源码和依赖，并将完整运行时放入安装包的 `resources/paseo/`。
 5. 工作流先创建草稿并上传全部产物，成功后发布稳定 Release。
 
 手动运行工作流只生成 Actions 附件，不发布 Release。发布只使用工作流内置 `GITHUB_TOKEN`，不在仓库保存访问令牌。

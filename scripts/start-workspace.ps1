@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath 'node_modules\electron\dist\electron.exe')) {
     & npm.cmd ci
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
-if (-not (Test-Path -LiteralPath 'dist\index.html')) {
+if (-not (Test-Path -LiteralPath 'dist\index.html') -or -not (Test-Path -LiteralPath 'runtime\paseo\desktop-dist\main.js')) {
     & npm.cmd run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

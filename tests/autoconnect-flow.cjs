@@ -115,6 +115,46 @@ async function run() {
       assert.equal(await connected(), false);
     });
 
+    await check('pasting a key is blocked without SSH or disclosure; choosing a key file recovers', async () => {
+      const before = calls.connect.length;
+      const secret = 'synthetic-key-body-not-for-display';
+      const pasted = ['-----BEGIN', 'OPENSSH', 'PRIVATE KEY-----', secret].join(' ');
+      await click('.connection-button');
+      const prevented = await evaluate(`(() => {
+        const input = document.querySelector('input[aria-describedby="private-key-path-help"]');
+        const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', ${JSON.stringify(pasted)});
+        const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData });
+        input.dispatchEvent(event); return event.defaultPrevented;
+      })()`);
+      assert.equal(prevented, true);
+      await waitFormError('需要私钥文件路径');
+      assert.equal(await evaluate('document.querySelector(\'input[aria-describedby="private-key-path-help"]\').value'), '');
+      assert.ok(!(await evaluate('document.body.innerText')).includes(secret));
+      assert.equal(calls.connect.length, before);
+      // Native input events (including single-line text pasted by other means)
+      // are checked too, not only ClipboardEvent.
+      await evaluate(`(() => {
+        const input = document.querySelector('input[aria-describedby="private-key-path-help"]');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(pasted)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await waitFormError('需要私钥文件路径');
+      assert.equal(await evaluate('document.querySelector(\'input[aria-describedby="private-key-path-help"]\').value'), '');
+      await clickText('仅保存配置');
+      await until(() => evaluate('!document.querySelector(".connection-form")'), 'safe empty path saved');
+      await main.store.queue;
+      assert.ok(!(await fs.readFile(path.join(dataDirectory, 'workspace.json'), 'utf8')).includes(secret));
+      await click('.connection-button');
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [configuration.privateKeyPath] });
+      try { await click('.input-with-button button'); }
+      finally { dialog.showOpenDialog = unexpected; }
+      await until(() => evaluate(`document.querySelector('input[aria-describedby="private-key-path-help"]').value === ${JSON.stringify(configuration.privateKeyPath)}`), 'selected key path');
+      await clickText('连接设备');
+      await until(connected, 'selected key connects');
+      assert.equal(calls.connect.length, before + 1);
+      assert.equal(calls.connect.at(-1).privateKeyPath, configuration.privateKeyPath);
+    });
+
     const passwordConfiguration = { ...configuration, authType: 'password', privateKeyPath: '' };
     const fixturePassword = 'fixture-password-only-DO-NOT-USE-67231';
     await check('missing password opens repair form; one input saves encrypted credentials', async () => {

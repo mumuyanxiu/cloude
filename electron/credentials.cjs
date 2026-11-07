@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { WindowsDpapiProvider } = require('./dpapi.cjs');
+const { assertPrivateKeyPath } = require('./key-path.cjs');
 
 function credentialId(config, platform = process.platform) {
   const keyPath = config.authType === 'key' && config.privateKeyPath
@@ -117,6 +118,7 @@ class CredentialStore {
 }
 
 async function connectWithCredentials(remote, credentials, config) {
+  if (config?.authType === 'key') assertPrivateKeyPath(config.privateKeyPath);
   const hydrated = await credentials.hydrate(config);
   // Authentication must succeed before a new or changed credential is retained.
   const result = await remote.connect(hydrated);

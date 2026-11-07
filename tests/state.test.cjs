@@ -14,6 +14,23 @@ test('connection credentials never enter saved state', () => {
   assert.equal(cleanState({ connection: { host: 'old-profile' } }).connection.autoConnect, true);
   for (const secret of ['secret', 'phrase', 'key-data']) assert.ok(!JSON.stringify(state).includes(secret));
 });
+test('private key bodies in the path field are removed before saving and when loading old profiles', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-key-path-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const store = new StateStore(dir);
+  const secret = 'synthetic-key-body-not-for-storage';
+  const raw = { connection: { host: 'fixture', privateKeyPath: ['-----BEGIN', 'OPENSSH', 'PRIVATE KEY-----', secret].join(' ') } };
+  await store.save(raw);
+  assert.equal((await store.load()).connection.privateKeyPath, '');
+  assert.ok(!(await fs.readFile(path.join(dir, 'workspace.json'), 'utf8')).includes(secret));
+  await fs.writeFile(path.join(dir, 'workspace.json'), JSON.stringify(raw));
+  const loaded = await store.load();
+  assert.equal(loaded.connection.host, 'fixture');
+  assert.equal(loaded.connection.privateKeyPath, '');
+  await store.save(loaded);
+  assert.ok(!(await fs.readFile(path.join(dir, 'workspace.json'), 'utf8')).includes(secret));
+});
+
 test('queued writes preserve latest state and reload intact', async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-state-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));

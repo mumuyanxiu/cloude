@@ -173,7 +173,7 @@ class Protocol(unittest.TestCase):
                 child.terminate()
                 child.wait(timeout=5)
 
-        with patch.object(RUNNER.subprocess, 'Popen', side_effect=launch), patch.object(RUNNER, 'terminate', terminate):
+        with patch.object(RUNNER.subprocess, 'Popen', side_effect=launch), patch.object(RUNNER, 'terminate', terminate), patch.object(RUNNER, 'IDLE_SECONDS', 0):
             RUNNER.worker(folder)
         status = RUNNER.read_json(folder / 'status.json')
         self.assertEqual(status['state'], 'completed', status)

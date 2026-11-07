@@ -114,6 +114,7 @@ export function UsagePanel({ connectionKey, refreshToken, visible, revealToken =
         })}</div> : <p className={`usage-message ${error ? 'usage-error' : ''}`} role="status">{error || (loading ? '正在读取账户额度…' : '尚未读取账户额度')}</p>}
         {usage && error && <p className="usage-error usage-refresh-error" role="status"><strong>刷新失败</strong><span>{error}</span></p>}
         {usage && <div className="usage-footer"><span title={fullTimeLabel(updated?.getTime() ?? null)}>{updated ? `更新于 ${updated.toLocaleTimeString('zh-CN', { timeZone: usageTimeZone, hour: '2-digit', minute: '2-digit', hour12: false })}（UTC+8）` : '更新时间未提供'}</span><span>{loading ? '刷新中…' : 'Claude 账户'}</span></div>}
+        {usage && <p className="usage-message">账户共享累计用量；一次任务可能包含多轮模型调用。</p>}
       </>}
     </div>}
   </section>;

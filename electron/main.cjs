@@ -10,14 +10,8 @@ const { createUploadPlan, executeUploadPlan } = require('./uploads.cjs');
 const { UpdateService } = require('./updates.cjs');
 
 const testMode = process.env.CLOUDE_TEST || process.env.CLOUD_CLAUDE_TEST;
-app.setName('Cloude');
-if (process.platform === 'win32') app.setAppUserModelId('io.github.cloudclaude.desktop');
-// Reuse the established profile so renamed builds can read existing settings and credentials.
-const dataDirectory = process.env.CLOUDE_DATA || process.env.CLOUD_CLAUDE_DATA || (app.isPackaged ? path.join(app.getPath('appData'), 'Cloud Claude') : path.join(__dirname, '..', '.runtime'));
-app.setPath('userData', dataDirectory);
-const browserDataDirectory = path.join(dataDirectory, 'browser-cache');
-require('node:fs').mkdirSync(browserDataDirectory, { recursive: true });
-app.setPath('sessionData', browserDataDirectory);
+// The 2.0 launcher and the direct legacy entry use the same established profile.
+const dataDirectory = require('./workspace-startup.cjs').configureProfile(app);
 // A shared profile must have only one writer, including across app versions.
 // Isolated integration fixtures intentionally use their own test processes.
 if (!testMode && !app.requestSingleInstanceLock()) app.exit(0);
@@ -159,6 +153,15 @@ handleRemote('saveFile', value => {
 });
 handleRemote('mkdir', value => remote.mkdir(text(params(value).path, '目录')));
 handleRemote('getDiff', value => remote.getDiff(text(params(value).projectPath, '项目路径')));
+handle('getModels', async value => {
+  if (connecting) throw new Error('正在连接，请稍候');
+  if (!activeConfig) throw new Error('请先连接设备');
+  const version = connectionVersion;
+  const projectPath = value?.projectPath ? text(value.projectPath, '项目路径') : undefined;
+  const result = await remote.getModels(projectPath);
+  if (version !== connectionVersion || !activeConfig) throw new Error('连接已变化，请刷新模型列表。');
+  return result;
+});
 handle('getUsage', async () => {
   if (connecting) throw new Error('正在连接，请稍候');
   if (!activeConfig) throw new Error('请先连接设备');
@@ -295,4 +298,9 @@ app.on('before-quit', event => {
     app.quit();
   });
 });
-module.exports = { ready, getWindow: () => window, remote, store, credentials, updates, features };
+const restartApplication = require('./workspace-restart.cjs').createWorkspaceRestarter({ app, getWindows: () => window ? [window] : [] });
+async function restartWorkspace(args) {
+  if (jobs.size || operations || connecting || uploading) throw new Error('请先完成正在运行的任务和文件操作，再切换工作台。');
+  return restartApplication(args);
+}
+module.exports = { ready, getWindow: () => window, remote, store, credentials, updates, features, restartWorkspace };

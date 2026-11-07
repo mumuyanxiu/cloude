@@ -4,4 +4,8 @@
 .model-controls select:disabled{cursor:default;opacity:.55}
 .model-controls .custom-model{flex:1 1 180px;min-width:0;max-width:100%;border:1px solid var(--line);border-radius:5px;background:var(--paper);padding:6px 8px;font-size:11px;color:var(--ink)}
 .model-controls-note{font-size:9px;color:var(--muted)}
+.model-refresh{display:inline-flex;align-items:center;padding:3px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.model-refresh:disabled{opacity:.5;cursor:default}
+.model-catalog-status{flex-basis:100%;font-size:9px;color:var(--muted)}
+.model-catalog-status.error{color:var(--danger,#b64532)}
 @media(max-width:1150px){.model-controls{gap:5px 10px}.model-controls select{max-width:125px}.model-controls-note{flex-basis:100%}}

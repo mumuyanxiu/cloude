@@ -45,6 +45,7 @@ async function run() {
   main.remote.disconnect = async () => {};
   main.remote.listFiles = async () => [{ name: 'main.py', path: `${project}/main.py`, type: 'file', size: 10, mtime: 100 }];
   main.remote.listSessions = async () => ({ sessions: [] });
+  main.remote.getModels = async () => ({ models: ['sonnet', 'opus', 'fable'].map(value => ({ value, displayName: value, description: 'Fixture model', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] })), fetchedAt: Date.now() });
   main.remote.getUsage = async () => ({ available: false, limits: [], fetchedAt: Date.now(), message: '模拟设备未提供额度数据' });
   main.remote.startChat = async options => { calls.chat.push(options); return { jobId: options.jobId }; };
   main.remote.runCommand = async options => { calls.commands.push(options); return { jobId: options.jobId }; };

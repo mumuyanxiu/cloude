@@ -3,6 +3,7 @@ dist/
 release/
 .runtime/
 output/
+runtime/
 *.log
 *.pem
 *.key

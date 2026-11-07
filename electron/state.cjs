@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
+const { containsKeyMaterial } = require('./key-path.cjs');
 
 async function replaceWithRetry(source, target, { rename = fs.rename, wait = delay, platform = process.platform } = {}) {
   const pauses = platform === 'win32' ? [50, 100, 200, 400] : [];
@@ -26,6 +27,7 @@ function cleanState(input) {
   const result = defaults();
   const connection = input.connection || {};
   for (const field of ['host', 'username', 'authType', 'privateKeyPath', 'workspace', 'claudePath']) {
+    if (field === 'privateKeyPath' && containsKeyMaterial(connection[field])) continue;
     if (typeof connection[field] === 'string') result.connection[field] = connection[field].slice(0, 4096);
   }
   if (Number.isInteger(connection.port) && connection.port > 0 && connection.port < 65536) result.connection.port = connection.port;

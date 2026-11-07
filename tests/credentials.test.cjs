@@ -9,6 +9,13 @@ const { CredentialStore, credentialId, connectWithCredentials } = require('../el
 const { SCHEME } = require('../electron/dpapi.cjs');
 
 const config = { host: 'workspace-fixture', port: 22, username: 'tester', authType: 'password', autoConnect: true };
+test('pasted key bodies are rejected before credential lookup or SSH', async () => {
+  const unexpected = async () => { assert.fail('must reject before touching credentials or SSH'); };
+  await assert.rejects(connectWithCredentials({ connect: unexpected }, { hydrate: unexpected }, {
+    ...config, authType: 'key', privateKeyPath: ['-----BEGIN', 'OPENSSH', 'PRIVATE KEY-----', 'synthetic-body'].join(' '),
+  }), /需要私钥文件路径/);
+});
+
 function encryptionFixture() {
   const key = crypto.randomBytes(32);
   return {

@@ -13,6 +13,8 @@ export interface RemoteTask { jobId: string; conversationId: string; projectPath
 export interface PortForward { id: string; remotePort: number; localPort: number; url: string }
 export interface RemoteSession { sessionId: string; title: string; updatedAt: number }
 export type ClaudeEffort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export interface ClaudeModel { value: string; displayName: string; description: string; supportsEffort?: boolean; supportedEffortLevels?: Exclude<ClaudeEffort, ''>[] }
+export interface ModelCatalog { models: ClaudeModel[]; fetchedAt: number }
 export interface AppState { connection: ConnectionConfig; projects: Project[]; conversations: Conversation[]; settings?: { activeProjectId?: string; activeConversationId?: string; panelWidth?: number; durableTasks?: boolean; notifications?: boolean; model?: string; customModel?: string; effort?: ClaudeEffort } }
 export interface FileEntry { name: string; path: string; type: 'directory' | 'file' | 'symlink'; size: number; mtime: number }
 export interface ConnectionInfo { home: string; workspace: string; hostname: string; claudeVersion: string; claudeAvailable: boolean; warning?: string; credentialSaved?: boolean }
@@ -69,6 +71,7 @@ export interface DesktopAPI {
   loadState(): Promise<AppState>; saveState(state: AppState): Promise<void>;
   pickPrivateKey(): Promise<string | null>; connect(config: ConnectionConfig): Promise<ConnectionInfo>; disconnect(): Promise<void>;
   getUsage(): Promise<AccountUsage>;
+  getModels(options: { projectPath?: string }): Promise<ModelCatalog>;
   listFiles(options: { path: string }): Promise<FileEntry[]>;
   openProject(options: { path: string }): Promise<{ path: string; name: string }>;
   listSessions(options: { projectPath: string }): Promise<{ sessions: RemoteSession[]; warning?: string }>;

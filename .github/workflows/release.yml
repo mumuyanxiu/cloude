@@ -17,6 +17,7 @@ jobs:
   windows:
     needs: linux-tasks
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,9 +34,17 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:desktop
+      - run: npm run test:paseo
       - run: npm run package
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify packaged Paseo desktop
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $env:CLOUDE_TEST_EXECUTABLE = (Resolve-Path "release/$version/win-unpacked/Cloude.exe").Path
+          npm run test:paseo
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged workspace verification failed.' }
       - run: npm run verify:release
       - uses: actions/upload-artifact@v4
         with:
@@ -63,7 +72,10 @@ jobs:
           )
           # Upload while hidden, then expose metadata and binaries together.
           $notesFile = Join-Path $env:RUNNER_TEMP 'cloude-release-notes.txt'
-          Get-Content -LiteralPath CHANGELOG.md -Raw | Set-Content -LiteralPath $notesFile -Encoding utf8
+          $changelog = Get-Content -LiteralPath CHANGELOG.md -Raw
+          $entry = [regex]::Match($changelog, "(?ms)^## $([regex]::Escape($version))[^\r\n]*\r?\n(.*?)(?=^## |\z)")
+          if (-not $entry.Success) { throw 'Release notes for this version are missing.' }
+          $entry.Groups[1].Value.Trim() | Set-Content -LiteralPath $notesFile -Encoding utf8
           gh release create $env:GITHUB_REF_NAME --draft --verify-tag --title "Cloude $version" --notes-file $notesFile @assets
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
