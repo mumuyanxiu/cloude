@@ -73,14 +73,41 @@ class Tasks(unittest.TestCase):
     def tearDown(self):
         for job in self.jobs:
             self.request('stop', job)
-        for p in (self.root / '.cloude-tasks').glob('*/*/worker.json'):
-            p.with_name('retire').touch()
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
-            if all(json.loads(p.read_text()).get('state') == 'closed' for p in (self.root / '.cloude-tasks').glob('*/*/worker.json')):
+            records = []
+            for p in (self.root / '.cloude-tasks').glob('*/*/worker.json'):
+                p.with_name('retire').touch()
+                records.append(json.loads(p.read_text()))
+            records.extend(json.loads(p.read_text()) for p in (self.root / '.cloude-tasks').glob('*/*/status.json'))
+            # A worker publishes closed before its final status/log writes. Wait
+            # for the actual supervisor to exit before removing its directory.
+            if not any(self.worker_running(record) for record in records):
                 break
             time.sleep(0.1)
+        else:
+            self.fail('Detached worker processes did not exit before fixture cleanup')
         self.temp.cleanup()
+
+    def worker_running(self, record):
+        pid = record.get('pid')
+        if not pid:
+            return record.get('state') in ('starting', 'running', 'waiting')
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        if Path('/proc').is_dir():
+            try:
+                text = Path('/proc/%s/stat' % pid).read_text()
+            except FileNotFoundError:
+                return False
+            fields = text[text.rfind(')') + 2:].split()
+            return fields[0] not in ('Z', 'X') and (not record.get('processStamp') or fields[19] == record['processStamp'])
+        return True
+
+    def test_cleanup_waits_for_a_live_supervisor_even_when_marked_closed(self):
+        self.assertTrue(self.worker_running({'pid': os.getpid(), 'state': 'closed'}))
 
     def request(self, action, job='job', **extra):
         data = {'action': action, 'jobId': job, 'projectPath': str(self.project), **extra}
